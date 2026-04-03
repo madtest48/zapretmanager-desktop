@@ -133,6 +133,10 @@ Windows-приложение для установки, обновления, з
 
 Помимо настройки и проверки конфигов, в программе есть и прикладные утилиты для повседневного использования. Например, можно очистить кэш Discord прямо из интерфейса, не ища нужные папки вручную.
 
+## Обратная связь
+
+Если найдёшь ошибку или странное поведение программы, лучше всего написать об этом в [GitHub Issues](https://github.com/Valturere/zapretmanager-desktop/issues).
+
 ## Важно
 
 `ZapretManager` не заменяет сам проект zapret и не является его официальной частью. Это отдельный Windows-менеджер для более удобной работы со сборками.
@@ -275,6 +279,10 @@ Service lists can be edited directly from the program without manually opening f
 ## Useful tools
 
 Besides build management and config testing, the program also includes practical utility actions. For example, you can clear Discord cache directly from the interface without hunting for the correct folders manually.
+
+## Feedback
+
+If you find a bug or strange behavior, the best place to report it is [GitHub Issues](https://github.com/Valturere/zapretmanager-desktop/issues).
 
 ## Important
 

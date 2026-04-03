@@ -7,6 +7,7 @@ namespace ZapretManager;
 public partial class ThemedDialogWindow : Window
 {
     public bool RememberChoice => RememberCheckBox.IsChecked == true;
+    public DialogService.DialogChoice Choice { get; private set; } = DialogService.DialogChoice.Closed;
 
     public ThemedDialogWindow(
         string title,
@@ -16,7 +17,8 @@ public partial class ThemedDialogWindow : Window
         bool useLightTheme,
         string? rememberText = null,
         string? primaryButtonText = null,
-        string? secondaryButtonText = null)
+        string? secondaryButtonText = null,
+        string? tertiaryButtonText = null)
     {
         InitializeComponent();
         TitleTextBlock.Text = title;
@@ -31,6 +33,12 @@ public partial class ThemedDialogWindow : Window
         PrimaryButton.Content = primaryButtonText ?? (buttons == DialogService.DialogButtons.YesNo ? "Да" : "Закрыть");
         SecondaryButton.Content = secondaryButtonText ?? "Нет";
         SecondaryButton.Visibility = buttons == DialogService.DialogButtons.YesNo ? Visibility.Visible : Visibility.Collapsed;
+        if (!string.IsNullOrWhiteSpace(tertiaryButtonText))
+        {
+            TertiaryButton.Content = tertiaryButtonText;
+            TertiaryButton.Visibility = Visibility.Visible;
+        }
+
         PrimaryButton.Background = isError
             ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(197, 91, 91))
             : (System.Windows.Media.Brush)FindResource("DialogPrimaryBrush");
@@ -47,18 +55,28 @@ public partial class ThemedDialogWindow : Window
 
     private void PrimaryButton_Click(object sender, RoutedEventArgs e)
     {
+        Choice = DialogService.DialogChoice.Primary;
         DialogResult = true;
         Close();
     }
 
     private void SecondaryButton_Click(object sender, RoutedEventArgs e)
     {
+        Choice = DialogService.DialogChoice.Secondary;
+        DialogResult = false;
+        Close();
+    }
+
+    private void TertiaryButton_Click(object sender, RoutedEventArgs e)
+    {
+        Choice = DialogService.DialogChoice.Tertiary;
         DialogResult = false;
         Close();
     }
 
     private void CloseButton_Click(object sender, RoutedEventArgs e)
     {
+        Choice = DialogService.DialogChoice.Closed;
         DialogResult = false;
         Close();
     }

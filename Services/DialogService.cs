@@ -6,6 +6,13 @@ namespace ZapretManager.Services;
 public static class DialogService
 {
     public readonly record struct ConfirmResult(bool Accepted, bool RememberChoice);
+    public enum DialogChoice
+    {
+        Closed,
+        Primary,
+        Secondary,
+        Tertiary
+    }
 
     public static void ShowInfo(string message, string title = "Zapret Manager", Window? owner = null)
     {
@@ -28,7 +35,7 @@ public static class DialogService
         Window? owner = null,
         string rememberText = "Больше не спрашивать")
     {
-        var dialog = CreateDialog(title, message, isError: false, owner, DialogButtons.YesNo, rememberText, primaryButtonText: null, secondaryButtonText: null);
+        var dialog = CreateDialog(title, message, isError: false, owner, DialogButtons.YesNo, rememberText, primaryButtonText: null, secondaryButtonText: null, tertiaryButtonText: null);
         var accepted = dialog.ShowDialog() == true;
         return new ConfirmResult(accepted, accepted && dialog.RememberChoice);
     }
@@ -48,8 +55,31 @@ public static class DialogService
             DialogButtons.YesNo,
             rememberText: null,
             primaryButtonText,
-            secondaryButtonText);
+            secondaryButtonText,
+            tertiaryButtonText: null);
         return dialog.ShowDialog() == true;
+    }
+
+    public static DialogChoice ChooseCustom(
+        string message,
+        string title = "Zapret Manager",
+        Window? owner = null,
+        string primaryButtonText = "Да",
+        string secondaryButtonText = "Нет",
+        string tertiaryButtonText = "Отмена")
+    {
+        var dialog = CreateDialog(
+            title,
+            message,
+            isError: false,
+            owner,
+            DialogButtons.YesNo,
+            rememberText: null,
+            primaryButtonText,
+            secondaryButtonText,
+            tertiaryButtonText);
+        _ = dialog.ShowDialog();
+        return dialog.Choice;
     }
 
     public static DeleteZapretChoice ChooseDeleteZapretMode(
@@ -78,7 +108,7 @@ public static class DialogService
 
     private static bool? ShowDialog(string title, string message, bool isError, Window? owner, DialogButtons buttons)
     {
-        var dialog = CreateDialog(title, message, isError, owner, buttons, rememberText: null, primaryButtonText: null, secondaryButtonText: null);
+        var dialog = CreateDialog(title, message, isError, owner, buttons, rememberText: null, primaryButtonText: null, secondaryButtonText: null, tertiaryButtonText: null);
         return dialog.ShowDialog();
     }
 
@@ -90,13 +120,14 @@ public static class DialogService
         DialogButtons buttons,
         string? rememberText,
         string? primaryButtonText,
-        string? secondaryButtonText)
+        string? secondaryButtonText,
+        string? tertiaryButtonText)
     {
         var windowOwner = owner ?? System.Windows.Application.Current?.MainWindow;
         var useLightTheme = windowOwner is MainWindow mainWindow
             ? mainWindow.CurrentUseLightTheme
             : GetUseLightTheme();
-        var dialog = new ThemedDialogWindow(title, message, isError, buttons, useLightTheme, rememberText, primaryButtonText, secondaryButtonText);
+        var dialog = new ThemedDialogWindow(title, message, isError, buttons, useLightTheme, rememberText, primaryButtonText, secondaryButtonText, tertiaryButtonText);
         if (windowOwner is not null && windowOwner.IsLoaded)
         {
             dialog.Owner = windowOwner;

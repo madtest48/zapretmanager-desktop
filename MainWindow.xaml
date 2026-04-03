@@ -39,6 +39,7 @@
         <SolidColorBrush x:Key="CardEdgeBrush" Color="#214A70" po:Freeze="False" />
         <SolidColorBrush x:Key="AccentBrush" Color="#47C78B" po:Freeze="False" />
         <SolidColorBrush x:Key="AccentHoverBrush" Color="#5DD89B" po:Freeze="False" />
+        <SolidColorBrush x:Key="AccentBorderBrush" Color="#7BE2B2" po:Freeze="False" />
         <SolidColorBrush x:Key="ActionBrush" Color="#173454" po:Freeze="False" />
         <SolidColorBrush x:Key="ActionHoverBrush" Color="#21476F" po:Freeze="False" />
         <SolidColorBrush x:Key="TextMutedBrush" Color="#9AB2CD" po:Freeze="False" />
@@ -56,8 +57,8 @@
         <SolidColorBrush x:Key="TooltipBorderBrush" Color="#31597F" po:Freeze="False" />
         <SolidColorBrush x:Key="TooltipTextBrush" Color="#EAF3FC" po:Freeze="False" />
         <SolidColorBrush x:Key="ScrollTrackBrush" Color="#102235" po:Freeze="False" />
-        <SolidColorBrush x:Key="ScrollThumbBrush" Color="#35506A" po:Freeze="False" />
-        <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#466481" po:Freeze="False" />
+        <SolidColorBrush x:Key="ScrollThumbBrush" Color="#4A6A86" po:Freeze="False" />
+        <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#5B7C98" po:Freeze="False" />
         <SolidColorBrush x:Key="SummarySuccessBadgeBrush" Color="#27423D" po:Freeze="False" />
         <SolidColorBrush x:Key="SummarySuccessBadgeBorderBrush" Color="#6C9184" po:Freeze="False" />
         <SolidColorBrush x:Key="SummarySuccessBadgeIconBrush" Color="#FFFFFF" po:Freeze="False" />
@@ -147,7 +148,7 @@
         <Style x:Key="PrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource ActionButtonStyle}">
             <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
             <Setter Property="Foreground" Value="#0A2416" />
-            <Setter Property="BorderBrush" Value="#7BE2B2" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentBorderBrush}" />
             <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
                     <Setter Property="Background" Value="{DynamicResource AccentHoverBrush}" />
@@ -903,7 +904,7 @@
                                 <Button Grid.Row="2" Grid.Column="0" Content="Выбрать папку" Margin="0" MinWidth="0" Command="{Binding BrowseCommand}" Style="{StaticResource ActionButtonStyle}" ToolTip="Выбрать рабочую папку zapret вручную." />
                                 <Button Grid.Row="2" Grid.Column="2" Content="Открыть" Margin="0" MinWidth="0" Command="{Binding OpenFolderCommand}" Style="{StaticResource ActionButtonStyle}" ToolTip="Открыть текущую папку zapret в проводнике." />
                                 <Button Grid.Row="4" Grid.Column="0" Content="Скачать zapret" Margin="0" MinWidth="0" Command="{Binding DownloadZapretCommand}" Style="{StaticResource ActionButtonStyle}" ToolTip="Скачать свежую сборку zapret в выбранную папку." />
-                                <Button Grid.Row="4" Grid.Column="2" Content="Удалить zapret" Margin="0" MinWidth="0" Command="{Binding DeleteZapretCommand}" Style="{StaticResource ActionButtonStyle}" ToolTip="Остановить процессы, удалить службу и удалить текущую папку zapret." />
+                    <Button Grid.Row="4" Grid.Column="2" Content="Удалить zapret" Margin="0" MinWidth="0" Command="{Binding DeleteZapretCommand}" Style="{StaticResource ActionButtonStyle}" ToolTip="Остановить процессы, удалить службу и удалить текущую установленную вместе с сохранённой предыдущей сборкой zapret." />
                                 <Button Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="3" Content="Автоматический режим" Margin="0" MinWidth="0" Command="{Binding AutoInstallCommand}" Style="{StaticResource PrimaryButtonStyle}" ToolTip="Если сборка уже выбрана, просто проверить конфиги и установить лучший как службу. Если сборки нет, сначала скачать свежий zapret." />
                             </Grid>
                         </StackPanel>

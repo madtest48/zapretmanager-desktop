@@ -43,8 +43,8 @@
         <SolidColorBrush x:Key="NeutralTextBrush" Color="#9AB2CD" />
         <SolidColorBrush x:Key="PingTextBrush" Color="#96D6E8" />
         <SolidColorBrush x:Key="ScrollTrackBrush" Color="#102235" />
-        <SolidColorBrush x:Key="ScrollThumbBrush" Color="#35506A" />
-        <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#466481" />
+        <SolidColorBrush x:Key="ScrollThumbBrush" Color="#4A6A86" />
+        <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#5B7C98" />
         <Style x:Key="DialogButtonStyle" TargetType="Button">
             <Setter Property="Height" Value="36" />
             <Setter Property="Cursor" Value="Hand" />

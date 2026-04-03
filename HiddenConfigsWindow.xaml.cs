@@ -63,8 +63,8 @@ public partial class HiddenConfigsWindow : Window
         SetBrushColor("MutedBrush", useLightTheme ? "#5A7591" : "#A7BBD1");
         SetBrushColor("PanelBrush", useLightTheme ? "#EEF5FB" : "#0C1A28");
         SetBrushColor("PanelBorderBrush", useLightTheme ? "#9CB7CF" : "#2C5478");
-        SetBrushColor("PrimaryBrush", useLightTheme ? "#43BF86" : "#47C78B");
-        SetBrushColor("PrimaryBorderBrush", useLightTheme ? "#6FD6A4" : "#7BE2B2");
+        SetBrushColor("PrimaryBrush", useLightTheme ? "#4FD593" : "#47C78B");
+        SetBrushColor("PrimaryBorderBrush", useLightTheme ? "#7CB392" : "#7BE2B2");
         SetBrushColor("PrimaryTextBrush", "#0A2416");
         SetBrushColor("ActionBrush", useLightTheme ? "#DCE9F5" : "#173454");
         SetBrushColor("ActionBorderBrush", useLightTheme ? "#87A8C8" : "#31597F");

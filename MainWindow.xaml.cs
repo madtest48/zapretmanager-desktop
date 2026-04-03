@@ -714,8 +714,9 @@ public partial class MainWindow : Window
         SetBrushColor("CardBrush", useLightTheme ? "#F7FBFF" : "#102235");
         SetBrushColor("CardBrush2", useLightTheme ? "#EFF6FC" : "#0D1C2C");
         SetBrushColor("CardEdgeBrush", useLightTheme ? "#9AB7D3" : "#214A70");
-        SetBrushColor("AccentBrush", useLightTheme ? "#43BF86" : "#47C78B");
-        SetBrushColor("AccentHoverBrush", useLightTheme ? "#58CF96" : "#5DD89B");
+        SetBrushColor("AccentBrush", useLightTheme ? "#4FD593" : "#47C78B");
+        SetBrushColor("AccentHoverBrush", useLightTheme ? "#67E1A5" : "#5DD89B");
+        SetBrushColor("AccentBorderBrush", useLightTheme ? "#7CB392" : "#7BE2B2");
         SetBrushColor("ActionBrush", useLightTheme ? "#DCE9F5" : "#173454");
         SetBrushColor("ActionHoverBrush", useLightTheme ? "#CFE1F1" : "#21476F");
         SetBrushColor("TextMutedBrush", useLightTheme ? "#4F6B88" : "#9AB2CD");
@@ -733,8 +734,8 @@ public partial class MainWindow : Window
         SetBrushColor("TooltipBorderBrush", useLightTheme ? "#87A8C8" : "#31597F");
         SetBrushColor("TooltipTextBrush", useLightTheme ? "#183049" : "#EAF3FC");
         SetBrushColor("ScrollTrackBrush", useLightTheme ? "#E4EEF7" : "#102235");
-        SetBrushColor("ScrollThumbBrush", useLightTheme ? "#B7C9DB" : "#35506A");
-        SetBrushColor("ScrollThumbHoverBrush", useLightTheme ? "#9FB8D0" : "#466481");
+        SetBrushColor("ScrollThumbBrush", useLightTheme ? "#8EA9C2" : "#4A6A86");
+        SetBrushColor("ScrollThumbHoverBrush", useLightTheme ? "#7897B5" : "#5B7C98");
         SetBrushColor("SummarySuccessBadgeBrush", useLightTheme ? "#D9EDE3" : "#27423D");
         SetBrushColor("SummarySuccessBadgeBorderBrush", useLightTheme ? "#A8C4B7" : "#6C9184");
         SetBrushColor("SummarySuccessBadgeIconBrush", useLightTheme ? "#2E6350" : "#FFFFFF");

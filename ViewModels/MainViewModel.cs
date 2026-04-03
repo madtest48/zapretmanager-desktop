@@ -13,9 +13,13 @@ namespace ZapretManager.ViewModels;
 
 public sealed class MainViewModel : ObservableObject
 {
-    private const string AuthorGitHubUrl = "";
+    private const string AuthorGitHubProfileUrl = "https://github.com/Valturere";
+    private const string AuthorGitHubRepositoryUrl = "https://github.com/Valturere/zapretmanager-desktop";
+    private const string FlowsealProfileUrl = "https://github.com/Flowseal";
     private const string FlowsealRepositoryUrl = "https://github.com/Flowseal/zapret-discord-youtube";
+    private const string ZapretProfileUrl = "https://github.com/bol-van";
     private const string ZapretRepositoryUrl = "https://github.com/bol-van/zapret";
+    private const string IssuesUrl = "https://github.com/Valturere/zapretmanager-desktop/issues";
 
     private readonly ZapretDiscoveryService _discoveryService = new();
     private readonly ZapretProcessService _processService = new();
@@ -156,7 +160,7 @@ public sealed class MainViewModel : ObservableObject
         RemoveServiceCommand = new AsyncRelayCommand(RemoveServiceAsync, () => _installation is not null && !IsBusy);
         RunTestsCommand = new RelayCommand(ToggleProbe, () => _installation is not null && ConfigRows.Count > 0 && (!IsBusy || IsProbeRunning));
         CheckUpdatesCommand = new AsyncRelayCommand(() => CheckUpdatesAsync(true), () => _installation is not null && !IsBusy);
-        ApplyUpdateCommand = new AsyncRelayCommand(ApplyUpdateAsync, () => _installation is not null && HasUpdate && !IsBusy);
+        ApplyUpdateCommand = new AsyncRelayCommand(() => ApplyUpdateAsync(), () => _installation is not null && HasUpdate && !IsBusy);
         RestorePreviousVersionCommand = new AsyncRelayCommand(RestorePreviousVersionAsync, () => _installation is not null && HasPreviousVersion && !IsBusy && !IsProbeRunning);
         ApplyGameModeCommand = new AsyncRelayCommand(ApplyGameModeAsync, () => _installation is not null && SelectedGameMode is not null && !IsBusy);
         UseDefaultTargetsCommand = new RelayCommand(UseDefaultTargets, () => !IsBusy);
@@ -494,7 +498,7 @@ public sealed class MainViewModel : ObservableObject
                 SelectedConfig = Configs.FirstOrDefault(item =>
                     string.Equals(item.FilePath, value.FilePath, StringComparison.OrdinalIgnoreCase));
 
-                if (SelectedConfig is not null && !_isRebuildingRows)
+                if (SelectedConfig is not null && !_isRebuildingRows && !IsProbeRunning)
                 {
                     LastActionText = $"Действие: выбран конфиг {SelectedConfig.Name}";
                 }
@@ -1128,9 +1132,13 @@ public sealed class MainViewModel : ObservableObject
     {
         var window = new AboutWindow(
             _managerVersion,
-            AuthorGitHubUrl,
+            AuthorGitHubProfileUrl,
+            AuthorGitHubRepositoryUrl,
+            FlowsealProfileUrl,
             FlowsealRepositoryUrl,
+            ZapretProfileUrl,
             ZapretRepositoryUrl,
+            IssuesUrl,
             UseLightThemeEnabled);
         if (System.Windows.Application.Current?.MainWindow is Window owner && owner.IsLoaded)
         {
@@ -1282,6 +1290,7 @@ public sealed class MainViewModel : ObservableObject
             }
 
             _openAuxiliaryWindows.Remove(window);
+            RestoreOwnerAfterAuxiliaryClose(window);
         };
 
         _probeDetailsWindow = window;
@@ -1322,6 +1331,7 @@ public sealed class MainViewModel : ObservableObject
                 }
 
                 _openAuxiliaryWindows.Remove(window);
+                RestoreOwnerAfterAuxiliaryClose(window);
             };
 
             _diagnosticsWindow = window;
@@ -1356,6 +1366,7 @@ public sealed class MainViewModel : ObservableObject
         {
             window.Closed -= ClosedHandler;
             _openAuxiliaryWindows.Remove(window);
+            RestoreOwnerAfterAuxiliaryClose(window);
             completionSource.TrySetResult(acceptedPredicate());
         }
 
@@ -1376,6 +1387,39 @@ public sealed class MainViewModel : ObservableObject
         catch
         {
         }
+    }
+
+    private void RestoreOwnerAfterAuxiliaryClose(Window closedWindow)
+    {
+        if (_openAuxiliaryWindows.Any(window => window.IsVisible))
+        {
+            return;
+        }
+
+        if (closedWindow.Owner is not Window owner || !owner.IsLoaded || !owner.IsVisible)
+        {
+            return;
+        }
+
+        owner.Dispatcher.BeginInvoke(() =>
+        {
+            if (_openAuxiliaryWindows.Any(window => window.IsVisible) || !owner.IsVisible)
+            {
+                return;
+            }
+
+            if (owner.WindowState == WindowState.Minimized)
+            {
+                owner.WindowState = WindowState.Normal;
+            }
+
+            owner.ShowInTaskbar = true;
+            owner.Show();
+            owner.Activate();
+            owner.Topmost = true;
+            owner.Topmost = false;
+            owner.Focus();
+        }, DispatcherPriority.ApplicationIdle);
     }
 
     public async Task ApplyDnsProfileFromTrayAsync(string profileKey)
@@ -1960,6 +2004,7 @@ public sealed class MainViewModel : ObservableObject
                 cancellationToken.ThrowIfCancellationRequested();
                 var profile = visibleProfiles[index];
                 RuntimeStatus = $"Проверяем {profile.Name} ({index + 1}/{visibleProfiles.Count})";
+                LastActionText = $"Действие: проверяем конфиг {profile.Name} ({index + 1}/{visibleProfiles.Count})";
                 MarkProbeProfileStarted(index);
 
                 var result = await _connectivityTestService.ProbeConfigAsync(_installation, profile, targetArg, cancellationToken);
@@ -2067,35 +2112,54 @@ public sealed class MainViewModel : ObservableObject
 
         if (_installation is null)
         {
-            var dialog = new OpenFolderDialog
+            var discoveredInstallation = _discoveryService.DiscoverQuick(Directory.GetCurrentDirectory());
+            if (discoveredInstallation is not null)
             {
-                Title = "Выберите папку, куда установить zapret для автоматического режима"
-            };
+                await SelectInstallationAsync(
+                    discoveredInstallation,
+                    $"Действие: автоматический режим нашёл существующую сборку {discoveredInstallation.RootPath}",
+                    checkUpdates: false);
 
-            if (dialog.ShowDialog() != true)
-            {
-                return;
+                ShowInlineNotification($"Автоматический режим нашёл существующую сборку: {discoveredInstallation.Version}.");
+
+                var shouldContinueAutomaticMode = await PromptAutomaticModeUpdateAsync();
+                if (!shouldContinueAutomaticMode || _installation is null)
+                {
+                    return;
+                }
             }
-
-            UpdateOperationResult? installResult = null;
-            await RunBusyAsync(async () =>
+            else
             {
-                UpdateStatus = "Обновления: скачиваем свежую сборку для автоматического режима...";
-                RuntimeStatus = "Автоматический режим: скачиваем zapret...";
-                LastActionText = "Действие: автоматический режим скачивает свежий zapret";
-                installResult = await _updateService.InstallFreshAsync(dialog.FolderName);
-                UpdateStatus = $"Обновления: установлена версия {installResult.InstalledVersion}";
-            });
+                var dialog = new OpenFolderDialog
+                {
+                    Title = "Выберите папку, куда установить zapret для автоматического режима"
+                };
 
-            if (installResult is null)
-            {
-                return;
+                if (dialog.ShowDialog() != true)
+                {
+                    return;
+                }
+
+                UpdateOperationResult? installResult = null;
+                await RunBusyAsync(async () =>
+                {
+                    UpdateStatus = "Обновления: скачиваем свежую сборку для автоматического режима...";
+                    RuntimeStatus = "Автоматический режим: скачиваем zapret...";
+                    LastActionText = "Действие: автоматический режим скачивает свежий zapret";
+                    installResult = await _updateService.InstallFreshAsync(dialog.FolderName);
+                    UpdateStatus = $"Обновления: установлена версия {installResult.InstalledVersion}";
+                });
+
+                if (installResult is null)
+                {
+                    return;
+                }
+
+                var installation = _discoveryService.TryLoad(installResult.ActiveRootPath)
+                                  ?? throw new InvalidOperationException("Свежая сборка скачалась, но её не удалось подключить.");
+
+                await SelectInstallationAsync(installation, $"Действие: автоматический режим подключил {installResult.ActiveRootPath}");
             }
-
-            var installation = _discoveryService.TryLoad(installResult.ActiveRootPath)
-                              ?? throw new InvalidOperationException("Свежая сборка скачалась, но её не удалось подключить.");
-
-            await SelectInstallationAsync(installation, $"Действие: автоматический режим подключил {installResult.ActiveRootPath}");
         }
         else
         {
@@ -2671,15 +2735,38 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
-        var showUpdatePrompt = false;
-        string? latestVersion = null;
-        var currentVersion = _installation.Version;
+        var hasUpdate = await RefreshUpdateAvailabilityAsync(showNoUpdatesMessage: showMessage);
+        if (!showMessage || !hasUpdate || string.IsNullOrWhiteSpace(_updateLatestVersion))
+        {
+            return;
+        }
 
+        var currentVersion = _installation.Version;
+        var shouldUpdate = DialogService.ConfirmCustom(
+            $"Найдена новая версия: {_updateLatestVersion}.{Environment.NewLine}Текущая: {currentVersion}",
+            "Zapret Manager",
+            primaryButtonText: "Обновить",
+            secondaryButtonText: "Закрыть");
+
+        if (shouldUpdate)
+        {
+            await ApplyUpdateAsync();
+        }
+    }
+
+    private async Task<bool> RefreshUpdateAvailabilityAsync(bool showNoUpdatesMessage)
+    {
+        if (_installation is null)
+        {
+            return false;
+        }
+
+        var installationVersion = _installation.Version;
         await RunBusyAsync(async () =>
         {
             UpdateStatus = "Обновления: проверяем...";
             LastActionText = "Действие: проверяем обновления";
-            var update = await _updateService.GetUpdateInfoAsync(_installation.Version);
+            var update = await _updateService.GetUpdateInfoAsync(installationVersion);
             _updateDownloadUrl = update.DownloadUrl;
             _updateLatestVersion = update.LatestVersion;
             HasUpdate = update.IsUpdateAvailable && !string.IsNullOrWhiteSpace(update.DownloadUrl);
@@ -2688,36 +2775,23 @@ public sealed class MainViewModel : ObservableObject
             {
                 UpdateStatus = $"Обновления: доступна версия {update.LatestVersion}";
                 LastActionText = $"Действие: найдено обновление {update.LatestVersion}";
-                showUpdatePrompt = showMessage;
-                latestVersion = update.LatestVersion;
             }
             else
             {
-                UpdateStatus = $"Обновления: актуальная версия {_installation.Version}";
-                LastActionText = $"Действие: обновлений нет, версия {_installation.Version} актуальна";
-                if (showMessage)
-                {
-                    DialogService.ShowInfo("Новых обновлений не найдено.", "Zapret Manager");
-                }
+                UpdateStatus = $"Обновления: актуальная версия {installationVersion}";
+                LastActionText = $"Действие: обновлений нет, версия {installationVersion} актуальна";
             }
         });
 
-        if (showUpdatePrompt && HasUpdate && !string.IsNullOrWhiteSpace(latestVersion))
+        if (!HasUpdate && showNoUpdatesMessage)
         {
-            var shouldUpdate = DialogService.ConfirmCustom(
-                $"Найдена новая версия: {latestVersion}.{Environment.NewLine}Текущая: {currentVersion}",
-                "Zapret Manager",
-                primaryButtonText: "Обновить",
-                secondaryButtonText: "Закрыть");
-
-            if (shouldUpdate)
-            {
-                await ApplyUpdateAsync();
-            }
+            DialogService.ShowInfo("Новых обновлений не найдено.", "Zapret Manager");
         }
+
+        return HasUpdate;
     }
 
-    private async Task ApplyUpdateAsync()
+    private async Task ApplyUpdateAsync(bool promptForAutomaticMode = true)
     {
         if (_installation is null || string.IsNullOrWhiteSpace(_updateDownloadUrl) || string.IsNullOrWhiteSpace(_updateLatestVersion))
         {
@@ -2780,6 +2854,12 @@ public sealed class MainViewModel : ObservableObject
             ? "Предыдущая версия не была сохранена."
             : "Предыдущая версия сохранена. Её можно вернуть кнопкой «Откатить сборку».";
 
+        if (!promptForAutomaticMode)
+        {
+            ShowInlineNotification("Обновление завершено. Новая сборка подключена.");
+            return;
+        }
+
         var shouldRunAutomaticMode = DialogService.ConfirmCustom(
             $"Новая версия установлена в:{Environment.NewLine}{updateResult.ActiveRootPath}{Environment.NewLine}{Environment.NewLine}{previousVersionNote}{Environment.NewLine}{Environment.NewLine}Ваши списки и targets.txt перенесены в новую сборку.{Environment.NewLine}{Environment.NewLine}Запустить автоматический режим сейчас?",
             "Zapret Manager",
@@ -2789,11 +2869,10 @@ public sealed class MainViewModel : ObservableObject
         if (shouldRunAutomaticMode)
         {
             await RunAutomaticInstallAsync();
+            return;
         }
-        else
-        {
-            ShowInlineNotification("Обновление завершено. Новая сборка подключена.");
-        }
+
+        ShowInlineNotification("Обновление завершено. Новая сборка подключена.");
     }
 
     private async Task RestorePreviousVersionAsync()
@@ -3248,7 +3327,44 @@ public sealed class MainViewModel : ObservableObject
         ApplyGameModeCommand.NotifyCanExecuteChanged();
     }
 
-    private async Task SelectInstallationAsync(ZapretInstallation installation, string actionText)
+    private async Task<bool> PromptAutomaticModeUpdateAsync()
+    {
+        if (_installation is null)
+        {
+            return false;
+        }
+
+        var currentVersion = _installation.Version;
+        var hasUpdate = await RefreshUpdateAvailabilityAsync(showNoUpdatesMessage: false);
+        if (!hasUpdate || string.IsNullOrWhiteSpace(_updateLatestVersion))
+        {
+            LastActionText = $"Действие: автоматический режим использует найденную сборку {currentVersion}";
+            return true;
+        }
+
+        var choice = DialogService.ChooseCustom(
+            $"Найдена существующая сборка zapret версии {currentVersion}.{Environment.NewLine}Доступна новая версия: {_updateLatestVersion}.{Environment.NewLine}{Environment.NewLine}Обновить сборку перед автоматической настройкой?",
+            "Автоматический режим",
+            primaryButtonText: "Да",
+            secondaryButtonText: "Нет",
+            tertiaryButtonText: "Отмена");
+
+        switch (choice)
+        {
+            case DialogService.DialogChoice.Primary:
+                await ApplyUpdateAsync(promptForAutomaticMode: false);
+                LastActionText = $"Действие: автоматический режим обновил найденную сборку до {_installation?.Version ?? _updateLatestVersion}";
+                return _installation is not null;
+            case DialogService.DialogChoice.Secondary:
+                LastActionText = $"Действие: автоматический режим использует найденную сборку {currentVersion} без обновления";
+                return true;
+            default:
+                LastActionText = "Действие: автоматический режим отменён пользователем";
+                return false;
+        }
+    }
+
+    private async Task SelectInstallationAsync(ZapretInstallation installation, string actionText, bool checkUpdates = true)
     {
         _installation = installation;
         _updateService.DisableInternalCheckUpdatesForSiblingInstallations(installation.RootPath);
@@ -3263,7 +3379,7 @@ public sealed class MainViewModel : ObservableObject
             ShowInlineNotification($"В новую сборку автоматически возвращены сохранённые пользовательские файлы: {restoredUserFilesCount}.");
         }
 
-        if (AutoCheckUpdatesEnabled && _installation is not null)
+        if (checkUpdates && AutoCheckUpdatesEnabled && _installation is not null)
         {
             await CheckUpdatesAsync(false);
         }

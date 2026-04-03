@@ -121,7 +121,7 @@ public partial class DiagnosticsWindow : Window
     private void ApplyTheme(bool useLightTheme)
     {
         _useLightTheme = useLightTheme;
-        var primaryBorderColor = useLightTheme ? "#6FD6A4" : "#7BE2B2";
+        var primaryBorderColor = useLightTheme ? "#7CB392" : "#7BE2B2";
         SetBrushColor("WindowBgBrush", useLightTheme ? "#F7FBFF" : "#102235");
         SetBrushColor("WindowBorderBrush", useLightTheme ? "#9AB7D3" : "#295276");
         SetBrushColor("TextBrush", useLightTheme ? "#183049" : "#FFFFFF");
@@ -130,14 +130,14 @@ public partial class DiagnosticsWindow : Window
         SetBrushColor("PanelBorderBrush", useLightTheme ? "#9CB7CF" : "#274A6B");
         SetBrushColor("ActionBrush", useLightTheme ? "#DCE9F5" : "#173454");
         SetBrushColor("ActionBorderBrush", useLightTheme ? "#87A8C8" : "#31597F");
-        SetBrushColor("PrimaryBrush", useLightTheme ? "#43BF86" : "#47C78B");
+        SetBrushColor("PrimaryBrush", useLightTheme ? "#4FD593" : "#47C78B");
         SetBrushColor("PrimaryBorderBrush", primaryBorderColor);
         SetBrushColor("PrimaryTextBrush", "#0A2416");
         SetBrushColor("GridRowBrush", useLightTheme ? "#F7FBFF" : "#102235");
         SetBrushColor("GridAltRowBrush", useLightTheme ? "#EEF5FB" : "#0D1C2C");
         SetBrushColor("ScrollTrackBrush", useLightTheme ? "#E4EEF7" : "#102235");
-        SetBrushColor("ScrollThumbBrush", useLightTheme ? "#B7C9DB" : "#35506A");
-        SetBrushColor("ScrollThumbHoverBrush", useLightTheme ? "#9FB8D0" : "#466481");
+        SetBrushColor("ScrollThumbBrush", useLightTheme ? "#8EA9C2" : "#4A6A86");
+        SetBrushColor("ScrollThumbHoverBrush", useLightTheme ? "#7897B5" : "#5B7C98");
 
         if (_lastReport is not null)
         {

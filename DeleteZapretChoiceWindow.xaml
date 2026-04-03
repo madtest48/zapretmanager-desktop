@@ -83,6 +83,12 @@
                                Foreground="{DynamicResource MutedBrush}"
                                FontSize="14"
                                TextWrapping="Wrap" />
+                    <TextBlock Margin="0,8,0,0"
+                               Foreground="{DynamicResource TextBrush}"
+                               FontSize="13.5"
+                               FontWeight="SemiBold"
+                               TextWrapping="Wrap"
+                               Text="Будут удалены текущая установленная и сохранённая предыдущая версии zapret." />
                 </StackPanel>
 
                 <Button Grid.Column="1"
@@ -114,12 +120,12 @@
                                Foreground="{DynamicResource TextBrush}"
                                TextWrapping="Wrap"
                                LineHeight="22"
-                               Text="Удалить текущую и сохранённую предыдущую сборку, но оставить пользовательские списки для следующей установки. Менеджер автоматически вернёт их в новую сборку при следующем скачивании или выборе папки." />
+                               Text="Удалить текущую установленную и сохранённую предыдущую сборку, но оставить пользовательские списки для следующей установки. Менеджер автоматически вернёт их в новую сборку при следующем скачивании или выборе папки." />
                     <TextBlock Margin="0,10,0,0"
                                Foreground="{DynamicResource TextBrush}"
                                TextWrapping="Wrap"
                                LineHeight="22"
-                               Text="Или удалить всё подчистую: текущую и сохранённую предыдущую сборку, сохранённые списки менеджера и блок hosts, добавленный Zapret Manager." />
+                               Text="Или удалить всё подчистую: текущую установленную и сохранённую предыдущую сборку, сохранённые списки менеджера и блок hosts, добавленный Zapret Manager." />
                 </StackPanel>
             </Border>
 

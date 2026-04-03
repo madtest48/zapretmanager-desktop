@@ -259,8 +259,8 @@ public partial class ProbeDetailsWindow : Window
         SetBrushColor("NeutralTextBrush", useLightTheme ? "#6D849C" : "#9AB2CD");
         SetBrushColor("PingTextBrush", useLightTheme ? "#2C89A1" : "#96D6E8");
         SetBrushColor("ScrollTrackBrush", useLightTheme ? "#E4EEF7" : "#102235");
-        SetBrushColor("ScrollThumbBrush", useLightTheme ? "#B7C9DB" : "#35506A");
-        SetBrushColor("ScrollThumbHoverBrush", useLightTheme ? "#9FB8D0" : "#466481");
+        SetBrushColor("ScrollThumbBrush", useLightTheme ? "#8EA9C2" : "#4A6A86");
+        SetBrushColor("ScrollThumbHoverBrush", useLightTheme ? "#7897B5" : "#5B7C98");
 
         if (TitleTextBlock is not null)
         {

@@ -277,8 +277,8 @@ public partial class AllowDomainsImportWindow : Window
         SetBrushColor("InputBorderBrush", useLightTheme ? "#87A8C8" : "#2D5379");
         SetBrushColor("ActionBrush", useLightTheme ? "#DCE9F5" : "#173454");
         SetBrushColor("ActionBorderBrush", useLightTheme ? "#87A8C8" : "#31597F");
-        SetBrushColor("PrimaryBrush", useLightTheme ? "#43BF86" : "#47C78B");
-        SetBrushColor("PrimaryBorderBrush", useLightTheme ? "#6FD6A4" : "#7BE2B2");
+        SetBrushColor("PrimaryBrush", useLightTheme ? "#4FD593" : "#47C78B");
+        SetBrushColor("PrimaryBorderBrush", useLightTheme ? "#7CB392" : "#7BE2B2");
         SetBrushColor("PrimaryTextBrush", "#0A2416");
         SetBrushColor("SelectionBrush", useLightTheme ? "#EAF3FC" : "#183149");
     }

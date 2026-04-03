@@ -1,34 +1,49 @@
 using System.Diagnostics;
+using System;
 using System.Windows;
 
 namespace ZapretManager;
 
 public partial class AboutWindow : Window
 {
-    private readonly string _authorGitHubUrl;
+    private readonly string _authorProfileUrl;
+    private readonly string _authorRepositoryUrl;
+    private readonly string _flowsealProfileUrl;
     private readonly string _flowsealRepositoryUrl;
+    private readonly string _zapretProfileUrl;
     private readonly string _zapretRepositoryUrl;
+    private readonly string _issuesUrl;
 
     public AboutWindow(
         string version,
-        string authorGitHubUrl,
+        string authorProfileUrl,
+        string authorRepositoryUrl,
+        string flowsealProfileUrl,
         string flowsealRepositoryUrl,
+        string zapretProfileUrl,
         string zapretRepositoryUrl,
+        string issuesUrl,
         bool useLightTheme)
     {
         InitializeComponent();
-        _authorGitHubUrl = authorGitHubUrl?.Trim() ?? string.Empty;
+        _authorProfileUrl = authorProfileUrl?.Trim() ?? string.Empty;
+        _authorRepositoryUrl = authorRepositoryUrl?.Trim() ?? string.Empty;
+        _flowsealProfileUrl = flowsealProfileUrl?.Trim() ?? string.Empty;
         _flowsealRepositoryUrl = flowsealRepositoryUrl?.Trim() ?? string.Empty;
+        _zapretProfileUrl = zapretProfileUrl?.Trim() ?? string.Empty;
         _zapretRepositoryUrl = zapretRepositoryUrl?.Trim() ?? string.Empty;
-        VersionTextBlock.Text = version;
+        _issuesUrl = issuesUrl?.Trim() ?? string.Empty;
+        VersionTextBlock.Text = $"v{version}";
 
-        var hasAuthorLink = !string.IsNullOrWhiteSpace(_authorGitHubUrl);
+        var hasAuthorLink = !string.IsNullOrWhiteSpace(_authorProfileUrl) || !string.IsNullOrWhiteSpace(_authorRepositoryUrl);
         AuthorGitHubLabelTextBlock.Visibility = hasAuthorLink ? Visibility.Visible : Visibility.Collapsed;
         AuthorGitHubTextBlock.Visibility = hasAuthorLink ? Visibility.Visible : Visibility.Collapsed;
-        AuthorGitHubRun.Text = _authorGitHubUrl;
-
-        FlowsealRepositoryRun.Text = "Flowseal";
-        ZapretRepositoryRun.Text = "Zapret";
+        AuthorProfileRun.Text = GetLastPathSegment(_authorProfileUrl);
+        AuthorRepositoryRun.Text = GetLastPathSegment(_authorRepositoryUrl);
+        FlowsealProfileRun.Text = GetLastPathSegment(_flowsealProfileUrl);
+        FlowsealRepositoryRun.Text = GetLastPathSegment(_flowsealRepositoryUrl);
+        ZapretProfileRun.Text = GetLastPathSegment(_zapretProfileUrl);
+        ZapretRepositoryRun.Text = GetLastPathSegment(_zapretRepositoryUrl);
 
         ApplyTheme(useLightTheme);
     }
@@ -62,9 +77,19 @@ public partial class AboutWindow : Window
         }
     }
 
-    private void AuthorGitHubHyperlink_Click(object sender, RoutedEventArgs e)
+    private void AuthorProfileHyperlink_Click(object sender, RoutedEventArgs e)
     {
-        OpenLink(_authorGitHubUrl);
+        OpenLink(_authorProfileUrl);
+    }
+
+    private void AuthorRepositoryHyperlink_Click(object sender, RoutedEventArgs e)
+    {
+        OpenLink(_authorRepositoryUrl);
+    }
+
+    private void FlowsealProfileHyperlink_Click(object sender, RoutedEventArgs e)
+    {
+        OpenLink(_flowsealProfileUrl);
     }
 
     private void FlowsealRepositoryHyperlink_Click(object sender, RoutedEventArgs e)
@@ -72,9 +97,19 @@ public partial class AboutWindow : Window
         OpenLink(_flowsealRepositoryUrl);
     }
 
+    private void ZapretProfileHyperlink_Click(object sender, RoutedEventArgs e)
+    {
+        OpenLink(_zapretProfileUrl);
+    }
+
     private void ZapretRepositoryHyperlink_Click(object sender, RoutedEventArgs e)
     {
         OpenLink(_zapretRepositoryUrl);
+    }
+
+    private void IssuesHyperlink_Click(object sender, RoutedEventArgs e)
+    {
+        OpenLink(_issuesUrl);
     }
 
     private void CloseButton_Click(object sender, RoutedEventArgs e)
@@ -105,5 +140,30 @@ public partial class AboutWindow : Window
         catch
         {
         }
+    }
+
+    private static string GetLastPathSegment(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            {
+                var segments = uri.AbsolutePath.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+                if (segments.Length > 0)
+                {
+                    return segments[^1];
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return "GitHub";
     }
 }
