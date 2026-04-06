@@ -1,6 +1,8 @@
 using System.Diagnostics;
+using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace ZapretManager.Services;
 
@@ -287,6 +289,49 @@ public sealed class DnsService
         await ExecutePowerShellAsync(scriptBuilder.ToString());
     }
 
+    public string BuildApplyProfileErrorMessage(string rawMessage, string profileLabel, bool useDnsOverHttps)
+    {
+        var details = NormalizePowerShellError(rawMessage);
+        if (string.IsNullOrWhiteSpace(details))
+        {
+            details = "Не удалось изменить сетевые настройки Windows.";
+        }
+
+        if (useDnsOverHttps && IsDnsOverHttpsFailure(rawMessage, details))
+        {
+            return
+                $"Не удалось применить DNS-профиль «{profileLabel}».{Environment.NewLine}{Environment.NewLine}" +
+                "На этом ПК не получилось включить DNS-over-HTTPS (DoH)." +
+                $"{Environment.NewLine}{Environment.NewLine}Попробуйте выключить DoH и применить этот DNS как обычный." +
+                $"{Environment.NewLine}{Environment.NewLine}Техническая причина:{Environment.NewLine}{details}";
+        }
+
+        return
+            $"Не удалось применить DNS-профиль «{profileLabel}».{Environment.NewLine}{Environment.NewLine}" +
+            "Проверьте права администратора и попробуйте другой DNS-профиль." +
+            $"{Environment.NewLine}{Environment.NewLine}Техническая причина:{Environment.NewLine}{details}";
+    }
+
+    public string BuildApplyProfileShortError(string rawMessage, bool useDnsOverHttps)
+    {
+        if (useDnsOverHttps && IsDnsOverHttpsFailure(rawMessage, NormalizePowerShellError(rawMessage)))
+        {
+            return "не удалось включить DNS-over-HTTPS";
+        }
+
+        var details = NormalizePowerShellError(rawMessage);
+        if (string.IsNullOrWhiteSpace(details))
+        {
+            return "не удалось изменить DNS";
+        }
+
+        var firstLine = details
+            .Split([Environment.NewLine], StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault();
+
+        return string.IsNullOrWhiteSpace(firstLine) ? "не удалось изменить DNS" : firstLine;
+    }
+
     public IReadOnlyList<string> NormalizeDnsServers(string? primary, string? secondary)
     {
         return new[] { primary, secondary }
@@ -384,9 +429,8 @@ public sealed class DnsService
         var error = await errorTask;
         if (process.ExitCode != 0)
         {
-            throw new InvalidOperationException(string.IsNullOrWhiteSpace(error)
-                ? string.IsNullOrWhiteSpace(output) ? "Не удалось изменить DNS." : output.Trim()
-                : error.Trim());
+            var message = NormalizePowerShellError(!string.IsNullOrWhiteSpace(error) ? error : output);
+            throw new InvalidOperationException(string.IsNullOrWhiteSpace(message) ? "Не удалось изменить DNS." : message);
         }
     }
 
@@ -421,6 +465,86 @@ public sealed class DnsService
         catch
         {
         }
+    }
+
+    private static bool IsDnsOverHttpsFailure(string rawMessage, string normalizedMessage)
+    {
+        return ContainsAny(
+            rawMessage,
+            "DNS-over-HTTPS",
+            "Add-DnsClientDohServerAddress",
+            "Set-DnsClientDohServerAddress",
+            "netsh dnsclient set global doh",
+            "doh=yes",
+            "doh=no") ||
+               ContainsAny(
+                   normalizedMessage,
+                   "DNS-over-HTTPS",
+                   "Add-DnsClientDohServerAddress",
+                   "Set-DnsClientDohServerAddress",
+                   "netsh dnsclient set global doh",
+                   "doh=yes",
+                   "doh=no");
+    }
+
+    private static string NormalizePowerShellError(string? rawMessage)
+    {
+        if (string.IsNullOrWhiteSpace(rawMessage))
+        {
+            return string.Empty;
+        }
+
+        var text = rawMessage.Replace("\0", string.Empty, StringComparison.Ordinal).Trim();
+        if (text.Contains("CLIXML", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("<Objs", StringComparison.OrdinalIgnoreCase))
+        {
+            text = Regex.Replace(text, @"#<\s*CLIXML", string.Empty, RegexOptions.IgnoreCase);
+            text = text
+                .Replace("_x000D__x000A_", Environment.NewLine, StringComparison.OrdinalIgnoreCase)
+                .Replace("_x000A_", Environment.NewLine, StringComparison.OrdinalIgnoreCase)
+                .Replace("_x000D_", string.Empty, StringComparison.OrdinalIgnoreCase);
+            text = Regex.Replace(text, "<[^>]+>", " ");
+            text = WebUtility.HtmlDecode(text);
+        }
+
+        var filteredLines = text
+            .Split(["\r\n", "\n", "\r"], StringSplitOptions.None)
+            .Select(line => line.Trim())
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .Where(line => !line.StartsWith("CategoryInfo", StringComparison.OrdinalIgnoreCase))
+            .Where(line => !line.StartsWith("FullyQualifiedErrorId", StringComparison.OrdinalIgnoreCase))
+            .Where(line => !line.Contains("OperationStopped", StringComparison.OrdinalIgnoreCase))
+            .Where(line => !line.Contains("ParentContainsErrorRecordException", StringComparison.OrdinalIgnoreCase))
+            .Where(line => !line.Contains("RuntimeException", StringComparison.OrdinalIgnoreCase))
+            .Where(line => !line.Contains("at line:", StringComparison.OrdinalIgnoreCase))
+            .Where(line => !line.Contains("Exception calling", StringComparison.OrdinalIgnoreCase))
+            .Select(line => Regex.Replace(line, @"\s+", " ").Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (filteredLines.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        var preferredLines = filteredLines
+            .Where(line =>
+                line.Contains("DNS-over-HTTPS", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("DoH", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("Add-DnsClientDohServerAddress", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("Set-DnsClientDohServerAddress", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("не удалось", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("не найдена команда", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        return string.Join(
+            Environment.NewLine,
+            (preferredLines.Length > 0 ? preferredLines : filteredLines).Take(4));
+    }
+
+    private static bool ContainsAny(string value, params string[] patterns)
+    {
+        return patterns.Any(pattern => value.Contains(pattern, StringComparison.OrdinalIgnoreCase));
     }
 
     private static string EscapePowerShellSingleQuotedString(string value)

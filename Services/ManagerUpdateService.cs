@@ -118,6 +118,8 @@ public sealed class ManagerUpdateService
         string downloadedExecutablePath,
         string currentExecutablePath,
         int currentProcessId,
+        string? hostedServiceName = null,
+        bool restartHostedServiceAfterUpdate = false,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(downloadedExecutablePath) || !File.Exists(downloadedExecutablePath))
@@ -146,7 +148,7 @@ public sealed class ManagerUpdateService
         {
             FileName = "powershell.exe",
             Arguments =
-                $"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File {QuoteArgument(scriptPath)} -CurrentProcessId {currentProcessId} -SourcePath {QuoteArgument(downloadedExecutablePath)} -TargetPath {QuoteArgument(currentExecutablePath)} -BackupPath {QuoteArgument(backupPath)}",
+                $"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File {QuoteArgument(scriptPath)} -CurrentProcessId {currentProcessId} -SourcePath {QuoteArgument(downloadedExecutablePath)} -TargetPath {QuoteArgument(currentExecutablePath)} -BackupPath {QuoteArgument(backupPath)} -HostedServiceName {QuoteArgument(hostedServiceName ?? string.Empty)} -RestartHostedService:{(restartHostedServiceAfterUpdate ? "$true" : "$false")}",
             WorkingDirectory = updateDirectory,
             UseShellExecute = true
         };
@@ -302,7 +304,9 @@ param(
     [int]$CurrentProcessId,
     [string]$SourcePath,
     [string]$TargetPath,
-    [string]$BackupPath
+    [string]$BackupPath,
+    [string]$HostedServiceName = '',
+    [bool]$RestartHostedService = $false
 )
 
 $ErrorActionPreference = 'Stop'
@@ -320,6 +324,21 @@ for ($i = 0; $i -lt 120; $i++) {
 Start-Sleep -Milliseconds 350
 
 $backupCreated = $false
+$hostedServiceStopped = $false
+
+if ($RestartHostedService -and -not [string]::IsNullOrWhiteSpace($HostedServiceName)) {
+    try {
+        $service = Get-Service -Name $HostedServiceName -ErrorAction Stop
+        if ($service.Status -ne 'Stopped') {
+            Stop-Service -Name $HostedServiceName -Force -ErrorAction Stop
+            $service.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(30))
+            $hostedServiceStopped = $true
+        }
+    }
+    catch {
+        throw "Не удалось остановить службу перед обновлением программы: $($_.Exception.Message)"
+    }
+}
 
 try {
     if (Test-Path -LiteralPath $BackupPath) {
@@ -332,6 +351,11 @@ try {
     }
 
     Move-Item -LiteralPath $SourcePath -Destination $TargetPath -Force
+
+    if ($hostedServiceStopped -and -not [string]::IsNullOrWhiteSpace($HostedServiceName)) {
+        Start-Service -Name $HostedServiceName -ErrorAction Stop
+    }
+
     Start-Process -FilePath $TargetPath
 
     Start-Sleep -Seconds 2
@@ -341,6 +365,14 @@ try {
     }
 }
 catch {
+    if ($hostedServiceStopped -and -not [string]::IsNullOrWhiteSpace($HostedServiceName)) {
+        try {
+            Start-Service -Name $HostedServiceName -ErrorAction SilentlyContinue
+        }
+        catch {
+        }
+    }
+
     if ($backupCreated -and (Test-Path -LiteralPath $BackupPath) -and -not (Test-Path -LiteralPath $TargetPath)) {
         Move-Item -LiteralPath $BackupPath -Destination $TargetPath -Force
     }

@@ -339,9 +339,10 @@ public partial class DiagnosticsWindow : Window
 
     private void HandleRefreshFailure(Exception ex)
     {
+        var displayMessage = BuildDiagnosticsFailureMessage(ex);
         _lastReport = null;
         SummaryTextBlock.Text = "Диагностику не удалось завершить.";
-        StatusTextBlock.Text = $"Ошибка: {ex.Message}";
+        StatusTextBlock.Text = "Ошибка: не удалось получить результаты диагностики.";
         ProgressCountTextBlock.Text = $"{_progressCompleted} / {_progressTotal}";
         _rows.Clear();
         FixTimestampsButton.Visibility = Visibility.Collapsed;
@@ -351,5 +352,20 @@ public partial class DiagnosticsWindow : Window
         ActionsPanel.Visibility = Visibility.Visible;
         SetButtonsEnabled(true);
         UpdateProgressBar();
+        DialogService.ShowError(displayMessage, owner: this);
+    }
+
+    private static string BuildDiagnosticsFailureMessage(Exception exception)
+    {
+        var details = DialogService.GetDisplayMessage(exception, "Не удалось выполнить диагностику системы.");
+        if (details.Contains("Что можно попробовать:", StringComparison.OrdinalIgnoreCase))
+        {
+            return details;
+        }
+
+        return
+            "Не удалось выполнить диагностику системы." +
+            $"{Environment.NewLine}{Environment.NewLine}Повторите попытку. Если ошибка сохраняется, запустите программу от администратора." +
+            $"{Environment.NewLine}{Environment.NewLine}Техническая причина:{Environment.NewLine}{details}";
     }
 }

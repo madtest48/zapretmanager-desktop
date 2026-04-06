@@ -43,6 +43,27 @@ public sealed class StartupRegistrationService
         RegisterScheduledTask(executablePath);
     }
 
+    public string BuildSetEnabledErrorMessage(Exception exception, bool enable)
+    {
+        var details = DialogService.GetDisplayMessage(exception, enable
+            ? "Не удалось настроить автозапуск ZapretManager."
+            : "Не удалось изменить настройку автозапуска ZapretManager.");
+
+        if (details.Contains("Что можно попробовать:", StringComparison.OrdinalIgnoreCase))
+        {
+            return details;
+        }
+
+        var actionText = enable
+            ? "Не удалось включить автозапуск ZapretManager при входе в Windows."
+            : "Не удалось выключить автозапуск ZapretManager.";
+
+        return
+            $"{actionText}{Environment.NewLine}{Environment.NewLine}" +
+            "Проверьте Планировщик заданий Windows и повторите попытку." +
+            $"{Environment.NewLine}{Environment.NewLine}Техническая причина:{Environment.NewLine}{details}";
+    }
+
     private static void RemoveLegacyRunEntry()
     {
         using var key = Registry.CurrentUser.CreateSubKey(RunKeyPath)

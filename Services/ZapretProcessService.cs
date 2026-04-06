@@ -5,29 +5,18 @@ namespace ZapretManager.Services;
 
 public sealed class ZapretProcessService
 {
-    private readonly ZapretConfigurationParser _parser = new();
-
     public async Task StartAsync(ZapretInstallation installation, ConfigProfile profile, bool silentMode = false)
     {
         await EnableTcpTimestampsAsync();
 
         if (silentMode)
         {
-            _parser.EnsureUserFiles(installation);
-            var arguments = _parser.BuildArguments(installation, profile);
-
-            using var process = Process.Start(new ProcessStartInfo
-            {
-                FileName = Path.Combine(installation.BinPath, "winws.exe"),
-                Arguments = arguments,
-                WorkingDirectory = installation.BinPath,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                WindowStyle = ProcessWindowStyle.Hidden
-            });
-
+            using var process = await ZapretBatchLauncher.StartAndAttachWinwsAsync(
+                installation,
+                profile,
+                TimeSpan.FromSeconds(10));
             await Task.Delay(350);
-            if (process is not null && !process.HasExited)
+            if (!process.HasExited)
             {
                 return;
             }

@@ -1061,7 +1061,6 @@
                             <Grid Margin="0,0,0,0">
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
@@ -1083,14 +1082,6 @@
                                         Command="{Binding ApplyUpdateCommand}"
                                         Style="{StaticResource PrimaryButtonStyle}"
                                         ToolTip="Скачать и установить новую версию сборки." />
-                                <Button Grid.Row="1"
-                                        Grid.ColumnSpan="2"
-                                        Content="Откатить сборку"
-                                        Margin="0,8,0,0"
-                                        MinWidth="0"
-                                        Command="{Binding RestorePreviousVersionCommand}"
-                                        Style="{StaticResource ActionButtonStyle}"
-                                        ToolTip="Вернуть сохранённую предыдущую версию zapret." />
                             </Grid>
                             </StackPanel>
                         </Grid>

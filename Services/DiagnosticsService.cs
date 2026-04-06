@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Text;
 using Microsoft.Win32;
 using ZapretManager.Models;
 
@@ -10,6 +11,7 @@ namespace ZapretManager.Services;
 public sealed class DiagnosticsService
 {
     private static readonly string[] ConflictingBypassServices = ["GoodbyeDPI", "discordfix_zapret", "winws1", "winws2"];
+    private static readonly Encoding OemEncoding = Encoding.GetEncoding(866);
     private static readonly string[] VpnMarkers =
     [
         "VPN",
@@ -193,8 +195,7 @@ public sealed class DiagnosticsService
     private static async Task<(DiagnosticsCheckItem Item, bool NeedsFix)> CheckTcpTimestampsAsync(CancellationToken cancellationToken)
     {
         var output = await RunCommandCaptureAsync("netsh", "interface tcp show global", cancellationToken);
-        var enabled = output.IndexOf("timestamp", StringComparison.OrdinalIgnoreCase) >= 0 &&
-                      output.IndexOf("enabled", StringComparison.OrdinalIgnoreCase) >= 0;
+        var enabled = IsTcpTimestampsEnabled(output);
 
         return (new DiagnosticsCheckItem
         {
@@ -204,6 +205,40 @@ public sealed class DiagnosticsService
                 ? "TCP timestamps включены."
                 : "TCP timestamps выключены. Flowseal рекомендует включить их."
         }, !enabled);
+    }
+
+    private static bool IsTcpTimestampsEnabled(string output)
+    {
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            return false;
+        }
+
+        foreach (var rawLine in output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            var line = rawLine.Trim();
+            if (!ContainsAny(line, "timestamp", "timestamps", "rfc 1323", "временн", "метк"))
+            {
+                continue;
+            }
+
+            if (ContainsAny(line, "enabled", "включ", "разреш"))
+            {
+                return true;
+            }
+
+            if (ContainsAny(line, "disabled", "выключ", "отключ", "запрещ"))
+            {
+                return false;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool ContainsAny(string value, params string[] markers)
+    {
+        return markers.Any(marker => value.IndexOf(marker, StringComparison.OrdinalIgnoreCase) >= 0);
     }
 
     private static DiagnosticsCheckItem CheckAdguard()
@@ -702,6 +737,8 @@ public sealed class DiagnosticsService
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                StandardOutputEncoding = OemEncoding,
+                StandardErrorEncoding = OemEncoding,
                 CreateNoWindow = true
             }
         };
@@ -724,6 +761,8 @@ public sealed class DiagnosticsService
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                StandardOutputEncoding = OemEncoding,
+                StandardErrorEncoding = OemEncoding,
                 CreateNoWindow = true
             }
         };
@@ -742,6 +781,8 @@ public sealed class DiagnosticsService
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                StandardOutputEncoding = OemEncoding,
+                StandardErrorEncoding = OemEncoding,
                 CreateNoWindow = true
             }
         };

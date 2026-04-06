@@ -87,7 +87,7 @@ public partial class AllowDomainsImportWindow : Window
         }
         catch (Exception ex)
         {
-            DialogService.ShowError($"Не удалось загрузить готовые списки: {ex.Message}", owner: this);
+            DialogService.ShowError(BuildPresetLoadErrorMessage(ex), owner: this);
             Close();
         }
         finally
@@ -200,7 +200,7 @@ public partial class AllowDomainsImportWindow : Window
         }
         catch (Exception ex)
         {
-            DialogService.ShowError($"Не удалось обновить список {item.Label}: {ex.Message}", owner: this);
+            DialogService.ShowError(BuildPresetUpdateErrorMessage(item.Label, ex), owner: this);
             _isInitializing = true;
             item.IsSelected = !item.IsSelected;
             _isInitializing = false;
@@ -258,6 +258,36 @@ public partial class AllowDomainsImportWindow : Window
         SelectionSummaryTextBlock.Text = selectedCount == 0
             ? "Отметьте нужные наборы."
             : $"Выбрано наборов: {selectedCount}";
+    }
+
+    private static string BuildPresetLoadErrorMessage(Exception exception)
+    {
+        var details = DialogService.GetDisplayMessage(exception, "Не удалось загрузить готовые списки доменов.");
+        if (details.Contains("Что можно попробовать:", StringComparison.OrdinalIgnoreCase) ||
+            details.StartsWith("Не удалось загрузить список доменов", StringComparison.OrdinalIgnoreCase))
+        {
+            return details;
+        }
+
+        return
+            "Не удалось загрузить готовые списки доменов." +
+            $"{Environment.NewLine}{Environment.NewLine}Проверьте интернет и доступ к GitHub, затем повторите попытку." +
+            $"{Environment.NewLine}{Environment.NewLine}Техническая причина:{Environment.NewLine}{details}";
+    }
+
+    private static string BuildPresetUpdateErrorMessage(string label, Exception exception)
+    {
+        var details = DialogService.GetDisplayMessage(exception, $"Не удалось обновить список {label}.");
+        if (details.Contains("Что можно попробовать:", StringComparison.OrdinalIgnoreCase) ||
+            details.StartsWith("Не удалось загрузить список доменов", StringComparison.OrdinalIgnoreCase))
+        {
+            return details;
+        }
+
+        return
+            $"Не удалось обновить список {label}." +
+            $"{Environment.NewLine}{Environment.NewLine}Попробуйте повторить действие ещё раз." +
+            $"{Environment.NewLine}{Environment.NewLine}Техническая причина:{Environment.NewLine}{details}";
     }
 
     private void SetInteractiveState(bool isEnabled)

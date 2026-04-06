@@ -8,8 +8,9 @@ public sealed class ZapretConfigurationParser
 {
     private const string DummyUserValue = "domain.example.abc";
     private const string DummyIpValue = "203.0.113.113/32";
+    private const string RelativeListsPrefix = @"..\lists\";
 
-    public string BuildArguments(ZapretInstallation installation, ConfigProfile profile)
+    public string BuildArguments(ZapretInstallation installation, ConfigProfile profile, bool useCompactPaths = false)
     {
         EnsureUserFiles(installation);
 
@@ -57,10 +58,12 @@ public sealed class ZapretConfigurationParser
         }
 
         var (gameFilter, gameFilterTcp, gameFilterUdp) = GetGameFilterValues(installation.UtilsPath);
+        var binPrefix = useCompactPaths ? string.Empty : installation.BinPath.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var listsPrefix = useCompactPaths ? RelativeListsPrefix : installation.ListsPath.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         var normalized = combined.ToString()
             .Replace("^", " ", StringComparison.Ordinal)
-            .Replace("%BIN%", installation.BinPath.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
-            .Replace("%LISTS%", installation.ListsPath.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            .Replace("%BIN%", binPrefix, StringComparison.OrdinalIgnoreCase)
+            .Replace("%LISTS%", listsPrefix, StringComparison.OrdinalIgnoreCase)
             .Replace("%GameFilterTCP%", gameFilterTcp, StringComparison.OrdinalIgnoreCase)
             .Replace("%GameFilterUDP%", gameFilterUdp, StringComparison.OrdinalIgnoreCase)
             .Replace("%GameFilter%", gameFilter, StringComparison.OrdinalIgnoreCase);

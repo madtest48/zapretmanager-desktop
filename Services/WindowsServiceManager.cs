@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Reflection;
 using System.Text;
 using Microsoft.Win32;
 using ZapretManager.Models;
@@ -7,10 +8,10 @@ namespace ZapretManager.Services;
 
 public sealed class WindowsServiceManager
 {
-    private const string ServiceName = "zapret";
+    public const string ServiceName = "zapret";
+    private const string ServiceHostArgument = "--service-host";
     private static readonly string ServicesRegistryPath = @"SYSTEM\CurrentControlSet\Services";
     private static readonly Encoding OemEncoding = Encoding.GetEncoding(866);
-    private readonly ZapretConfigurationParser _parser = new();
 
     public ServiceStatusInfo GetStatus()
     {
@@ -32,11 +33,15 @@ public sealed class WindowsServiceManager
         };
     }
 
-    public async Task InstallAsync(ZapretInstallation installation, ConfigProfile profile)
+    public Task InstallAsync(ZapretInstallation installation, ConfigProfile profile)
     {
-        _parser.EnsureUserFiles(installation);
-        var arguments = _parser.BuildArguments(installation, profile);
-        var winwsPath = Path.Combine(installation.BinPath, "winws.exe");
+        return InstallAsync(installation, profile, null);
+    }
+
+    public async Task InstallAsync(ZapretInstallation installation, ConfigProfile profile, string? serviceHostExecutablePath)
+    {
+        var managerExecutablePath = GetManagerExecutablePath(serviceHostExecutablePath);
+        var imagePath = BuildServiceBinaryPath(managerExecutablePath, installation.RootPath, profile.FileName);
 
         await RunHiddenAsync("netsh.exe", ["interface", "tcp", "set", "global", "timestamps=enabled"]);
         await EnsureServiceRemovedAsync(ServiceName, TimeSpan.FromSeconds(15));
@@ -51,7 +56,7 @@ public sealed class WindowsServiceManager
                 "create",
                 ServiceName,
                 "binPath=",
-                $"\"{winwsPath}\" {arguments}",
+                imagePath,
                 "DisplayName=",
                 "zapret",
                 "start=",
@@ -98,12 +103,12 @@ public sealed class WindowsServiceManager
                 $"Служба установлена, но не запустилась. Возможно, мешают остатки старой службы или WinDivert.{Environment.NewLine}{start.Output}");
         }
 
-        await WaitForServiceStateAsync(ServiceName, shouldBeRunning: true, TimeSpan.FromSeconds(5));
+        await WaitForServiceStateAsync(ServiceName, shouldBeRunning: true, TimeSpan.FromSeconds(10));
         var statusOutput = RunHidden("sc.exe", $"query {ServiceName}");
         if (!statusOutput.Contains("RUNNING", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException(
-                $"Служба создалась, но не осталась запущенной. Возможно, мешают остатки старой службы или WinDivert.{Environment.NewLine}{statusOutput}");
+                $"Служба создалась, но не осталась запущенной. Возможно, служба не смогла стартовать winws.{Environment.NewLine}{statusOutput}");
         }
     }
 
@@ -128,6 +133,21 @@ public sealed class WindowsServiceManager
         await EnsureServiceRemovedAsync("WinDivert14", TimeSpan.FromSeconds(10));
     }
 
+    public bool UsesExecutable(string executablePath)
+    {
+        if (string.IsNullOrWhiteSpace(executablePath))
+        {
+            return false;
+        }
+
+        var configured = GetConfiguredExecutablePath();
+        return !string.IsNullOrWhiteSpace(configured) &&
+               string.Equals(
+                   Path.GetFullPath(configured),
+                   Path.GetFullPath(executablePath),
+                   StringComparison.OrdinalIgnoreCase);
+    }
+
     public static string RunHidden(string fileName, string arguments)
     {
         using var process = Process.Start(new ProcessStartInfo
@@ -149,6 +169,91 @@ public sealed class WindowsServiceManager
         return string.IsNullOrWhiteSpace(stderr) ? stdout : $"{stdout}{Environment.NewLine}{stderr}";
     }
 
+    private static string GetManagerExecutablePath(string? explicitExecutablePath)
+    {
+        if (!string.IsNullOrWhiteSpace(explicitExecutablePath))
+        {
+            var explicitPath = Path.GetFullPath(explicitExecutablePath);
+            if (!File.Exists(explicitPath))
+            {
+                throw new InvalidOperationException("Не найден указанный exe-файл ZapretManager для службы.");
+            }
+
+            return explicitPath;
+        }
+
+        var entryAssemblyName = Assembly.GetEntryAssembly()?.GetName().Name;
+        var expectedAppHostPath = !string.IsNullOrWhiteSpace(entryAssemblyName)
+            ? Path.Combine(AppContext.BaseDirectory, entryAssemblyName + ".exe")
+            : null;
+
+        var candidates = new[]
+        {
+            Environment.ProcessPath,
+            Process.GetCurrentProcess().MainModule?.FileName,
+            Environment.GetCommandLineArgs().FirstOrDefault(),
+            expectedAppHostPath
+        }
+        .Where(path => !string.IsNullOrWhiteSpace(path))
+        .Select(path => Path.GetFullPath(path!))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderBy(path => string.Equals(Path.GetFileName(path), "dotnet.exe", StringComparison.OrdinalIgnoreCase))
+        .ToArray();
+
+        var processPath = candidates.FirstOrDefault(File.Exists);
+        if (string.IsNullOrWhiteSpace(processPath))
+        {
+            throw new InvalidOperationException("Файл ZapretManager был перемещён после запуска. Закройте программу и откройте её заново из новой папки.");
+        }
+
+        return processPath;
+    }
+
+    private static string BuildServiceBinaryPath(string managerExecutablePath, string installationRootPath, string profileFileName)
+    {
+        return $"{QuoteArgument(managerExecutablePath)} {ServiceHostArgument} {QuoteArgument(installationRootPath)} {QuoteArgument(profileFileName)}";
+    }
+
+    private static string QuoteArgument(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "\"\"";
+        }
+
+        return $"\"{value.Replace("\"", "\\\"", StringComparison.Ordinal)}\"";
+    }
+
+    private string? GetConfiguredExecutablePath()
+    {
+        using var serviceKey = Registry.LocalMachine.OpenSubKey($@"SYSTEM\CurrentControlSet\Services\{ServiceName}");
+        var imagePath = serviceKey?.GetValue("ImagePath") as string;
+        return TryExtractExecutablePath(imagePath);
+    }
+
+    private static string? TryExtractExecutablePath(string? imagePath)
+    {
+        if (string.IsNullOrWhiteSpace(imagePath))
+        {
+            return null;
+        }
+
+        var trimmed = imagePath.Trim();
+        if (trimmed.Length == 0)
+        {
+            return null;
+        }
+
+        if (trimmed[0] == '"')
+        {
+            var closingQuote = trimmed.IndexOf('"', 1);
+            return closingQuote > 1 ? trimmed[1..closingQuote] : null;
+        }
+
+        var firstSpace = trimmed.IndexOf(' ');
+        return firstSpace > 0 ? trimmed[..firstSpace] : trimmed;
+    }
+
     private static async Task<string> RunHiddenAsync(string fileName, IEnumerable<string> arguments)
     {
         var result = await RunProcessAsync(fileName, arguments);
@@ -162,24 +267,50 @@ public sealed class WindowsServiceManager
             return;
         }
 
-        await RunHiddenAsync("sc.exe", ["stop", serviceName]);
-        await Task.Delay(500);
-        await RunHiddenAsync("sc.exe", ["delete", serviceName]);
-        await WaitForServiceDeletionAsync(serviceName, timeout);
+        var stopResult = await RunProcessAsync("sc.exe", ["stop", serviceName]);
+        if (stopResult.ExitCode != 0 && !CanIgnoreStopFailure(stopResult.Output))
+        {
+            throw new InvalidOperationException(
+                $"Не удалось остановить службу {serviceName}.{Environment.NewLine}{stopResult.Output}");
+        }
+
+        if (!await WaitForServiceStoppedOrGoneAsync(serviceName, TimeSpan.FromSeconds(Math.Min(timeout.TotalSeconds, 10))))
+        {
+            throw new InvalidOperationException($"Служба {serviceName} не остановилась вовремя перед удалением.");
+        }
+
+        if (!ServiceExists(serviceName))
+        {
+            return;
+        }
+
+        var deleteResult = await RunProcessAsync("sc.exe", ["delete", serviceName]);
+        if (deleteResult.ExitCode != 0 && !CanIgnoreDeleteFailure(deleteResult.Output))
+        {
+            throw new InvalidOperationException(
+                $"Не удалось удалить службу {serviceName}.{Environment.NewLine}{deleteResult.Output}");
+        }
+
+        if (!await WaitForServiceDeletionAsync(serviceName, timeout))
+        {
+            throw new InvalidOperationException($"Служба {serviceName} не была удалена вовремя.");
+        }
     }
 
-    private static async Task WaitForServiceDeletionAsync(string serviceName, TimeSpan timeout)
+    private static async Task<bool> WaitForServiceDeletionAsync(string serviceName, TimeSpan timeout)
     {
         var started = DateTime.UtcNow;
         while (ServiceExists(serviceName))
         {
             if (DateTime.UtcNow - started >= timeout)
             {
-                return;
+                return false;
             }
 
             await Task.Delay(400);
         }
+
+        return true;
     }
 
     private static async Task WaitForServiceStateAsync(string serviceName, bool shouldBeRunning, TimeSpan timeout)
@@ -211,6 +342,49 @@ public sealed class WindowsServiceManager
                output.Contains("marked for deletion", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static async Task<bool> WaitForServiceStoppedOrGoneAsync(string serviceName, TimeSpan timeout)
+    {
+        var started = DateTime.UtcNow;
+        while (DateTime.UtcNow - started < timeout)
+        {
+            if (!ServiceExists(serviceName))
+            {
+                return true;
+            }
+
+            var statusOutput = RunHidden("sc.exe", $"query {serviceName}");
+            if (statusOutput.Contains("STOPPED", StringComparison.OrdinalIgnoreCase) ||
+                statusOutput.Contains("1060", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            await Task.Delay(350);
+        }
+
+        return false;
+    }
+
+    private static bool CanIgnoreStopFailure(string output)
+    {
+        return output.Contains("1062", StringComparison.OrdinalIgnoreCase) ||
+               output.Contains("1060", StringComparison.OrdinalIgnoreCase) ||
+               output.Contains("already been stopped", StringComparison.OrdinalIgnoreCase) ||
+               output.Contains("already stopped", StringComparison.OrdinalIgnoreCase) ||
+               output.Contains("has not been started", StringComparison.OrdinalIgnoreCase) ||
+               output.Contains("не была запущена", StringComparison.OrdinalIgnoreCase) ||
+               output.Contains("не запущена", StringComparison.OrdinalIgnoreCase) ||
+               output.Contains("не существует", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool CanIgnoreDeleteFailure(string output)
+    {
+        return IsMarkedForDeletion(output) ||
+               output.Contains("1060", StringComparison.OrdinalIgnoreCase) ||
+               output.Contains("does not exist", StringComparison.OrdinalIgnoreCase) ||
+               output.Contains("не существует", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static async Task<ProcessRunResult> RunProcessAsync(string fileName, IEnumerable<string> arguments)
     {
         var startInfo = new ProcessStartInfo
@@ -229,12 +403,21 @@ public sealed class WindowsServiceManager
             startInfo.ArgumentList.Add(argument);
         }
 
-        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException($"Не удалось запустить {fileName}");
+        using var process = new Process
+        {
+            StartInfo = startInfo
+        };
+
+        process.Start();
         var stdout = await process.StandardOutput.ReadToEndAsync();
         var stderr = await process.StandardError.ReadToEndAsync();
         await process.WaitForExitAsync();
 
-        return new ProcessRunResult(process.ExitCode, string.IsNullOrWhiteSpace(stderr) ? stdout : $"{stdout}{Environment.NewLine}{stderr}");
+        var output = string.IsNullOrWhiteSpace(stderr)
+            ? stdout.Trim()
+            : $"{stdout}{Environment.NewLine}{stderr}".Trim();
+
+        return new ProcessRunResult(process.ExitCode, output);
     }
 
     private sealed record ProcessRunResult(int ExitCode, string Output);

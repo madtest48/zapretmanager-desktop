@@ -92,6 +92,9 @@ public sealed class MainViewModel : ObservableObject
     private bool _probeProgressIncludesRestoreStep;
     private bool _probeCurrentProfileActive;
     private DateTime _probeCurrentProfileStartedAtUtc;
+    private TimeSpan _probeInitialProfileEstimate;
+    private TimeSpan? _probeLastDisplayedRemaining;
+    private DateTime _probeLastEtaUpdatedAtUtc;
     private ProbeDetailsWindow? _probeDetailsWindow;
     private DiagnosticsWindow? _diagnosticsWindow;
     private readonly HashSet<Window> _openAuxiliaryWindows = [];
@@ -410,12 +413,28 @@ public sealed class MainViewModel : ObservableObject
         {
             if (SetProperty(ref _startWithWindowsEnabled, value))
             {
-                _settings.StartWithWindowsEnabled = value;
-                _settingsService.Save(_settings);
-                _startupRegistrationService.SetEnabled(value);
-                LastActionText = value
-                    ? "Действие: автозапуск с Windows включен"
-                    : "Действие: автозапуск с Windows выключен";
+                var previousValue = !value;
+                try
+                {
+                    _settings.StartWithWindowsEnabled = value;
+                    _settingsService.Save(_settings);
+                    _startupRegistrationService.SetEnabled(value);
+                    LastActionText = value
+                        ? "Действие: автозапуск с Windows включен"
+                        : "Действие: автозапуск с Windows выключен";
+                }
+                catch (Exception ex)
+                {
+                    _startWithWindowsEnabled = previousValue;
+                    OnPropertyChanged(nameof(StartWithWindowsEnabled));
+                    _settings.StartWithWindowsEnabled = previousValue;
+                    _settingsService.Save(_settings);
+                    LastActionText = value
+                        ? "Действие: не удалось включить автозапуск с Windows"
+                        : "Действие: не удалось выключить автозапуск с Windows";
+                    var displayMessage = _startupRegistrationService.BuildSetEnabledErrorMessage(ex, value);
+                    DialogService.ShowError(displayMessage, "Zapret Manager");
+                }
             }
         }
     }
@@ -1203,6 +1222,8 @@ public sealed class MainViewModel : ObservableObject
         }
 
         currentProcessPath = Path.GetFullPath(currentProcessPath);
+        var serviceStatus = _serviceManager.GetStatus();
+        var restartHostedServiceAfterUpdate = serviceStatus.IsRunning && _serviceManager.UsesExecutable(currentProcessPath);
         string? downloadedPath = null;
         await RunBusyAsync(async () =>
         {
@@ -1224,7 +1245,9 @@ public sealed class MainViewModel : ObservableObject
             await _managerUpdateService.LaunchPreparedUpdateAsync(
                 downloadedPath,
                 currentProcessPath,
-                Process.GetCurrentProcess().Id);
+                Process.GetCurrentProcess().Id,
+                WindowsServiceManager.ServiceName,
+                restartHostedServiceAfterUpdate);
         }
         catch (OperationCanceledException)
         {
@@ -1606,8 +1629,10 @@ public sealed class MainViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            LastActionText = $"Действие: DNS не изменён - {ex.Message}";
-            DialogService.ShowError(ex.Message, "Zapret Manager");
+            var shortError = _dnsService.BuildApplyProfileShortError(ex.Message, useDnsOverHttps);
+            var displayMessage = _dnsService.BuildApplyProfileErrorMessage(ex.Message, profileLabel, useDnsOverHttps);
+            LastActionText = $"Действие: DNS не изменён - {shortError}";
+            DialogService.ShowError(displayMessage, "Zapret Manager");
             return false;
         }
     }
@@ -4167,6 +4192,9 @@ public sealed class MainViewModel : ObservableObject
         _probeProgressIncludesRestoreStep = includeRestoreStep;
         _probeCurrentProfileActive = totalProfiles > 0;
         _probeCurrentProfileStartedAtUtc = DateTime.UtcNow;
+        _probeInitialProfileEstimate = _connectivityTestService.GetEstimatedProfileProbeDuration();
+        _probeLastDisplayedRemaining = null;
+        _probeLastEtaUpdatedAtUtc = DateTime.UtcNow;
         BusyProgressIsIndeterminate = false;
         BusyProgressValue = 0;
         RefreshProbeProgressDisplay();
@@ -4200,9 +4228,13 @@ public sealed class MainViewModel : ObservableObject
         }
 
         BusyProgressIsIndeterminate = false;
-        var averageProfileDuration = _probeProgressCompletedProfiles > 0 && _probeStopwatch.Elapsed > TimeSpan.Zero
-            ? TimeSpan.FromTicks(_probeStopwatch.Elapsed.Ticks / _probeProgressCompletedProfiles)
-            : _connectivityTestService.GetEstimatedProfileProbeDuration();
+        var averageProfileDuration = _probeInitialProfileEstimate;
+        if (_probeProgressCompletedProfiles > 0 && _probeStopwatch.Elapsed > TimeSpan.Zero)
+        {
+            var observedAverage = TimeSpan.FromTicks(_probeStopwatch.Elapsed.Ticks / _probeProgressCompletedProfiles);
+            averageProfileDuration = TimeSpan.FromTicks(Math.Max(_probeInitialProfileEstimate.Ticks, observedAverage.Ticks));
+        }
+
         var partialProgress = 0d;
         if (_probeCurrentProfileActive && _probeProgressCompletedProfiles < _probeProgressTotalProfiles)
         {
@@ -4229,7 +4261,7 @@ public sealed class MainViewModel : ObservableObject
             remaining += TimeSpan.FromSeconds(2);
         }
 
-        BusyEtaText = $"Осталось примерно: {FormatBusyDuration(remaining)}";
+        BusyEtaText = $"Осталось примерно: {FormatBusyDuration(SmoothProbeRemainingEstimate(remaining))}";
     }
 
     private void ResetBusyProgressState()
@@ -4241,9 +4273,44 @@ public sealed class MainViewModel : ObservableObject
         _probeProgressIncludesRestoreStep = false;
         _probeCurrentProfileActive = false;
         _probeCurrentProfileStartedAtUtc = default;
+        _probeInitialProfileEstimate = default;
+        _probeLastDisplayedRemaining = null;
+        _probeLastEtaUpdatedAtUtc = default;
         BusyProgressIsIndeterminate = true;
         BusyProgressValue = 0;
         BusyEtaText = string.Empty;
+    }
+
+    private TimeSpan SmoothProbeRemainingEstimate(TimeSpan remaining)
+    {
+        var now = DateTime.UtcNow;
+        if (_probeLastDisplayedRemaining is null)
+        {
+            _probeLastDisplayedRemaining = remaining;
+            _probeLastEtaUpdatedAtUtc = now;
+            return remaining;
+        }
+
+        var previous = _probeLastDisplayedRemaining.Value;
+        var elapsed = _probeLastEtaUpdatedAtUtc == default ? TimeSpan.Zero : now - _probeLastEtaUpdatedAtUtc;
+        _probeLastEtaUpdatedAtUtc = now;
+
+        var nextExpected = previous > TimeSpan.FromSeconds(10)
+            ? previous - elapsed
+            : previous;
+        if (nextExpected < TimeSpan.FromSeconds(10))
+        {
+            nextExpected = TimeSpan.FromSeconds(10);
+        }
+
+        var smoothed = remaining <= nextExpected ? remaining : nextExpected;
+        if (smoothed < TimeSpan.FromSeconds(10))
+        {
+            smoothed = TimeSpan.FromSeconds(10);
+        }
+
+        _probeLastDisplayedRemaining = smoothed;
+        return smoothed;
     }
 
     private static string FormatBusyDuration(TimeSpan duration)
@@ -4312,7 +4379,8 @@ public sealed class MainViewModel : ObservableObject
             _startWithWindowsEnabled = false;
             _settings.StartWithWindowsEnabled = false;
             _settingsService.Save(_settings);
-            _lastActionText = $"Действие: автозапуск не настроен - {ex.Message}";
+            var shortError = DialogService.GetShortDisplayMessage(ex, "не удалось настроить автозапуск");
+            _lastActionText = $"Действие: автозапуск не настроен - {shortError}";
         }
     }
 }

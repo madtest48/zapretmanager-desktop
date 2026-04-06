@@ -4,6 +4,7 @@ using ZapretManager.ViewModels;
 using System.Text;
 using System.Threading;
 using System.Windows.Threading;
+using System.ServiceProcess;
 using Forms = System.Windows.Forms;
 
 namespace ZapretManager;
@@ -12,6 +13,7 @@ public partial class App : System.Windows.Application
 {
     private const string InstanceMutexName = @"Local\ZapretManager.Instance";
     private const string ActivateEventName = @"Local\ZapretManager.Activate";
+    private const string AdminTaskLogEnvironmentVariable = "ZAPRETMANAGER_ADMIN_TASK_LOG";
 
     private Mutex? _instanceMutex;
     private bool _ownsInstanceMutex;
@@ -20,6 +22,15 @@ public partial class App : System.Windows.Application
 
     protected override async void OnStartup(StartupEventArgs e)
     {
+        if (e.Args.Length > 0 &&
+            string.Equals(e.Args[0], "--service-host", StringComparison.OrdinalIgnoreCase))
+        {
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+            ZapretWindowsService.RunFromArguments(e.Args);
+            Shutdown();
+            return;
+        }
+
         base.OnStartup(e);
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
@@ -28,9 +39,11 @@ public partial class App : System.Windows.Application
 
         if (e.Args.Length > 0)
         {
+            var adminTaskLogPath = Environment.GetEnvironmentVariable(AdminTaskLogEnvironmentVariable);
             try
             {
                 var exitCode = await AdminTaskDispatcher.TryRunAsync(e.Args);
+                TryWriteAdminTaskLog(adminTaskLogPath, exitCode.HasValue ? $"EXIT={exitCode.Value}" : "NO_MATCH");
                 if (exitCode.HasValue)
                 {
                     Shutdown(exitCode.Value);
@@ -39,6 +52,7 @@ public partial class App : System.Windows.Application
             }
             catch (Exception ex)
             {
+                TryWriteAdminTaskLog(adminTaskLogPath, ex.ToString());
                 DialogService.ShowError(ex, "Zapret Manager");
                 Shutdown(1);
                 return;
@@ -123,5 +137,27 @@ public partial class App : System.Windows.Application
     private void Application_ThreadException(object sender, ThreadExceptionEventArgs e)
     {
         DialogService.ShowError(e.Exception, "Zapret Manager");
+    }
+
+    private static void TryWriteAdminTaskLog(string? path, string content)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        try
+        {
+            var directory = Path.GetDirectoryName(path);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            File.WriteAllText(path, content);
+        }
+        catch
+        {
+        }
     }
 }
