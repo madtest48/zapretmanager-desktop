@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.NetworkInformation;
+using System.Net.WebSockets;
 using System.Security.Authentication;
 using System.Text.RegularExpressions;
 using ZapretManager.Models;
@@ -175,8 +176,11 @@ public sealed class ConnectivityTestService
         }
 
         var pingTask = ProbePingHostAsync(target.PingHost);
-        var protocolChecks = await Task.WhenAll(GetPrimaryProtocolDefinitions(target.Url ?? throw new InvalidOperationException("Для основной цели не указан URL."))
+        var primaryProtocolChecks = await Task.WhenAll(GetPrimaryProtocolDefinitions(target.Url ?? throw new InvalidOperationException("Для основной цели не указан URL."))
             .Select(definition => ProbePrimaryProtocolAsync(target.Url!, definition, cancellationToken)));
+        var protocolChecks = ShouldProbeDiscordGatewayWebSocket(target)
+            ? [.. primaryProtocolChecks, await ProbeDiscordGatewayWebSocketAsync(cancellationToken)]
+            : primaryProtocolChecks;
         var pingMilliseconds = await pingTask;
 
         var supportedChecks = protocolChecks
@@ -195,7 +199,11 @@ public sealed class ConnectivityTestService
             .Select(result => result.DurationMs!.Value)
             .ToArray();
 
-        var effectivePing = pingMilliseconds ?? (latencyValues.Length == 0 ? null : (long)Math.Round(latencyValues.Average()));
+        var effectivePing = pingMilliseconds.HasValue && pingMilliseconds.Value > 0
+            ? pingMilliseconds
+            : latencyValues.Length == 0
+                ? null
+                : (long)Math.Round(latencyValues.Average());
 
         return new ConnectivityTargetResult
         {
@@ -418,7 +426,7 @@ public sealed class ConnectivityTestService
                 Success = success,
                 Outcome = success ? ProbeOutcomeKind.Success : ProbeOutcomeKind.Failure,
                 HttpStatus = success ? "PING OK" : "Timeout",
-                PingMilliseconds = success ? (long)Math.Round(samples.Average()) : null,
+                PingMilliseconds = success ? NormalizeDisplayedPing((long)Math.Round(samples.Average())) : null,
                 IsDiagnosticOnly = target.IsDiagnosticOnly,
                 IsSupplementary = target.IsSupplementary
             };
@@ -436,6 +444,56 @@ public sealed class ConnectivityTestService
                 IsSupplementary = target.IsSupplementary
             };
         }
+    }
+
+    private static bool ShouldProbeDiscordGatewayWebSocket(ConnectivityTarget target)
+    {
+        return string.Equals(target.Name, "DiscordGateway", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(target.PingHost, "gateway.discord.gg", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task<ProtocolProbeResult> ProbeDiscordGatewayWebSocketAsync(CancellationToken cancellationToken)
+    {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(ProbeTimeout);
+
+        try
+        {
+            using var socket = new ClientWebSocket();
+            socket.Options.KeepAliveInterval = TimeSpan.FromSeconds(15);
+
+            var stopwatch = Stopwatch.StartNew();
+            await socket.ConnectAsync(new Uri("wss://gateway.discord.gg/?v=10&encoding=json"), timeoutCts.Token);
+            stopwatch.Stop();
+
+            var success = socket.State == WebSocketState.Open;
+            return new ProtocolProbeResult(
+                "WS",
+                Success: success,
+                IsSupported: true,
+                StatusText: success ? "OK" : "ERROR",
+                Details: success
+                    ? "WebSocket gateway доступен."
+                    : $"WebSocket gateway вернул состояние {socket.State}.",
+                DurationMs: success ? stopwatch.ElapsedMilliseconds : null);
+        }
+        catch (Exception ex)
+        {
+            return new ProtocolProbeResult(
+                "WS",
+                Success: false,
+                IsSupported: true,
+                StatusText: "ERROR",
+                Details: $"WebSocket gateway недоступен: {ex.Message}",
+                DurationMs: null);
+        }
+    }
+
+    private static long NormalizeDisplayedPing(long pingMilliseconds)
+    {
+        return pingMilliseconds <= 0
+            ? 1
+            : pingMilliseconds;
     }
 
     private static ConnectivityTarget? BuildTarget(string name, string value, bool classifySupplementary)

@@ -3,9 +3,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="О программе"
         Width="540"
-        Height="446"
         MinWidth="520"
-        MinHeight="420"
+        MinHeight="360"
+        SizeToContent="Height"
         WindowStyle="None"
         ResizeMode="NoResize"
         AllowsTransparency="True"
@@ -101,7 +101,7 @@
 
             <TextBlock Grid.Row="1"
                        Margin="0,12,0,0"
-                       Text="Менеджер для установки, обновления, запуска и проверки сборки zapret."
+                       Text="Менеджер для установки, обновления, запуска, проверки и отката сборки Flowseal/zapret-discord-youtube на Windows."
                        Foreground="{DynamicResource MutedBrush}"
                        FontSize="13.5"
                        TextWrapping="Wrap" />

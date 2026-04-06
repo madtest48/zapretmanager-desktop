@@ -31,6 +31,8 @@
         <SolidColorBrush x:Key="ScrollTrackBrush" Color="#102235" />
         <SolidColorBrush x:Key="ScrollThumbBrush" Color="#4A6A86" />
         <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#5B7C98" />
+        <SolidColorBrush x:Key="ProgressTrackBrush" Color="#18324C" />
+        <SolidColorBrush x:Key="ProgressFillBrush" Color="#47C78B" />
         <Style x:Key="DialogButtonStyle" TargetType="Button">
             <Setter Property="Height" Value="36" />
             <Setter Property="Cursor" Value="Hand" />
@@ -191,10 +193,39 @@
                     BorderBrush="{DynamicResource PanelBorderBrush}"
                     BorderThickness="1"
                     CornerRadius="12">
-                <TextBlock x:Name="StatusTextBlock"
-                           Foreground="{DynamicResource MutedBrush}"
-                           FontSize="12.5"
-                           Text="Проверяем систему..." />
+                <StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="StatusTextBlock"
+                                   Grid.Column="0"
+                                   Margin="0,0,12,0"
+                                   Foreground="{DynamicResource MutedBrush}"
+                                   FontSize="12.5"
+                                   Text="Проверяем систему..." />
+                        <TextBlock x:Name="ProgressCountTextBlock"
+                                   Grid.Column="1"
+                                   Foreground="{DynamicResource MutedBrush}"
+                                   FontSize="11.5"
+                                   FontWeight="SemiBold"
+                                   VerticalAlignment="Center"
+                                   Text="0 / 0" />
+                    </Grid>
+                    <Border x:Name="ProgressTrackBorder"
+                            Margin="0,10,0,0"
+                            Height="4"
+                            Background="{DynamicResource ProgressTrackBrush}"
+                            CornerRadius="2"
+                            SizeChanged="ProgressTrackBorder_SizeChanged">
+                        <Border x:Name="ProgressFillBorder"
+                                Width="0"
+                                HorizontalAlignment="Left"
+                                Background="{DynamicResource ProgressFillBrush}"
+                                CornerRadius="2" />
+                    </Border>
+                </StackPanel>
             </Border>
 
             <Grid x:Name="ResultsSectionGrid"
@@ -351,6 +382,7 @@
                                     <Setter Property="FontSize" Value="12.5" />
                                     <Setter Property="TextWrapping" Value="NoWrap" />
                                     <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+                                    <Setter Property="ToolTip" Value="{Binding TooltipText}" />
                                     <Setter Property="Margin" Value="10,0,0,0" />
                                     <Setter Property="VerticalAlignment" Value="Center" />
                                 </Style>
@@ -368,6 +400,7 @@
                                     <Setter Property="FontSize" Value="12.5" />
                                     <Setter Property="TextWrapping" Value="NoWrap" />
                                     <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+                                    <Setter Property="ToolTip" Value="{Binding TooltipText}" />
                                     <Setter Property="Margin" Value="10,0,8,0" />
                                     <Setter Property="VerticalAlignment" Value="Center" />
                                 </Style>

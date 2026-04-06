@@ -1,6 +1,6 @@
 # ZapretManager
 
-Windows-приложение для установки, обновления, запуска, проверки и отката сборок zapret на базе [Flowseal/zapret-discord-youtube](https://github.com/Flowseal/zapret-discord-youtube).
+Windows-приложение для установки, обновления, запуска, проверки и отката сборки [Flowseal/zapret-discord-youtube](https://github.com/Flowseal/zapret-discord-youtube) на Windows.
 
 `ZapretManager` нужен для того, чтобы работать со сборкой zapret из одного окна, без постоянного переключения между bat-файлами, папками, списками доменов и ручной диагностикой.
 

@@ -1,5 +1,7 @@
 using System.IO.Compression;
 using System.Net.Http;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Diagnostics;
 using ZapretManager.Models;
@@ -11,6 +13,8 @@ public sealed class UpdateService
     private const string VersionUrl = "https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/main/.service/version.txt";
     private const string ReleaseBaseUrl = "https://github.com/Flowseal/zapret-discord-youtube/releases/tag/";
     private const string ExpandedAssetsUrl = "https://github.com/Flowseal/zapret-discord-youtube/releases/expanded_assets/";
+    private const string ManagerAppDataFolderName = "ZapretManager";
+    private const string ManagerStorageContainerFolderName = "PreviousVersions";
     private const string ManagerStorageFolderName = ".zapret-manager";
     private const string PreviousVersionFolderName = "previous";
     private const string SwapVersionFolderName = "swap-current";
@@ -45,12 +49,7 @@ public sealed class UpdateService
             return null;
         }
 
-        var previousPath = GetPreviousVersionStoragePath(currentRootPath);
-        return Directory.Exists(previousPath) &&
-               File.Exists(Path.Combine(previousPath, "service.bat")) &&
-               File.Exists(Path.Combine(previousPath, "bin", "winws.exe"))
-            ? previousPath
-            : null;
+        return ResolveStoredPreviousVersionPath(currentRootPath);
     }
 
     public async Task<string?> DeleteStoredPreviousVersionAsync(string currentRootPath, CancellationToken cancellationToken = default)
@@ -60,8 +59,18 @@ public sealed class UpdateService
             return null;
         }
 
-        var previousPath = GetPreviousVersionStoragePath(currentRootPath);
-        return await DeleteDirectoryAsync(previousPath, cancellationToken);
+        string? pendingDeletePath = null;
+        foreach (var path in EnumerateStoredPreviousVersionPaths(currentRootPath))
+        {
+            var deletedPath = await DeleteDirectoryAsync(path, cancellationToken);
+            if (pendingDeletePath is null && !string.IsNullOrWhiteSpace(deletedPath))
+            {
+                pendingDeletePath = deletedPath;
+            }
+        }
+
+        TryDeleteLegacyManagerStorageIfEmpty(currentRootPath);
+        return pendingDeletePath;
     }
 
     public async Task<UpdateOperationResult> RestorePreviousVersionAsync(
@@ -75,7 +84,7 @@ public sealed class UpdateService
 
         EnsureManagerIsNotRunningInside(currentRootPath);
 
-        var previousPath = TryGetStoredPreviousVersionPath(currentRootPath);
+        var previousPath = ResolveStoredPreviousVersionPath(currentRootPath);
         if (string.IsNullOrWhiteSpace(previousPath))
         {
             throw new InvalidOperationException("Сохранённая предыдущая версия zapret не найдена.");
@@ -457,13 +466,14 @@ public sealed class UpdateService
 
     private static string GetManagerStoragePath(string rootPath)
     {
-        var rootDirectory = Directory.GetParent(Path.GetFullPath(rootPath))?.FullName;
-        if (string.IsNullOrWhiteSpace(rootDirectory))
+        var appDataRoot = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (string.IsNullOrWhiteSpace(appDataRoot))
         {
             throw new InvalidOperationException("Не удалось определить папку хранения служебных данных zapret.");
         }
 
-        return Path.Combine(rootDirectory, ManagerStorageFolderName);
+        var storageKey = BuildManagerStorageKey(rootPath);
+        return Path.Combine(appDataRoot, ManagerAppDataFolderName, ManagerStorageContainerFolderName, storageKey);
     }
 
     private static string GetPreviousVersionStoragePath(string rootPath)
@@ -480,15 +490,109 @@ public sealed class UpdateService
     {
         var storagePath = GetManagerStoragePath(rootPath);
         Directory.CreateDirectory(storagePath);
+    }
+
+    private static string GetLegacyManagerStoragePath(string rootPath)
+    {
+        var rootDirectory = Directory.GetParent(Path.GetFullPath(rootPath))?.FullName;
+        if (string.IsNullOrWhiteSpace(rootDirectory))
+        {
+            throw new InvalidOperationException("Не удалось определить папку хранения служебных данных zapret.");
+        }
+
+        return Path.Combine(rootDirectory, ManagerStorageFolderName);
+    }
+
+    private static string GetLegacyPreviousVersionStoragePath(string rootPath)
+    {
+        return Path.Combine(GetLegacyManagerStoragePath(rootPath), PreviousVersionFolderName);
+    }
+
+    private static bool IsValidStoredPreviousVersion(string path)
+    {
+        return Directory.Exists(path) &&
+               File.Exists(Path.Combine(path, "service.bat")) &&
+               File.Exists(Path.Combine(path, "bin", "winws.exe"));
+    }
+
+    private static IEnumerable<string> EnumerateStoredPreviousVersionPaths(string rootPath)
+    {
+        var currentPath = GetPreviousVersionStoragePath(rootPath);
+        var legacyPath = GetLegacyPreviousVersionStoragePath(rootPath);
+
+        if (Directory.Exists(currentPath))
+        {
+            yield return currentPath;
+        }
+
+        if (!string.Equals(currentPath, legacyPath, StringComparison.OrdinalIgnoreCase) && Directory.Exists(legacyPath))
+        {
+            yield return legacyPath;
+        }
+    }
+
+    private static string? ResolveStoredPreviousVersionPath(string rootPath)
+    {
+        var currentPath = GetPreviousVersionStoragePath(rootPath);
+        if (IsValidStoredPreviousVersion(currentPath))
+        {
+            return currentPath;
+        }
+
+        var legacyPath = GetLegacyPreviousVersionStoragePath(rootPath);
+        if (!IsValidStoredPreviousVersion(legacyPath))
+        {
+            TryDeleteLegacyManagerStorageIfEmpty(rootPath);
+            return null;
+        }
 
         try
         {
-            var directoryInfo = new DirectoryInfo(storagePath);
-            directoryInfo.Attributes |= FileAttributes.Hidden;
+            EnsureManagerStorageExists(rootPath);
+            if (!Directory.Exists(currentPath))
+            {
+                Directory.Move(legacyPath, currentPath);
+                TryDeleteLegacyManagerStorageIfEmpty(rootPath);
+                return currentPath;
+            }
         }
         catch
         {
         }
+
+        return legacyPath;
+    }
+
+    private static void TryDeleteLegacyManagerStorageIfEmpty(string rootPath)
+    {
+        try
+        {
+            var legacyRoot = GetLegacyManagerStoragePath(rootPath);
+            if (!Directory.Exists(legacyRoot))
+            {
+                return;
+            }
+
+            if (Directory.EnumerateFileSystemEntries(legacyRoot).Any())
+            {
+                return;
+            }
+
+            Directory.Delete(legacyRoot, recursive: false);
+        }
+        catch
+        {
+        }
+    }
+
+    private static string BuildManagerStorageKey(string rootPath)
+    {
+        var parentDirectory = Directory.GetParent(Path.GetFullPath(rootPath))?.FullName ?? Path.GetFullPath(rootPath);
+        var normalized = parentDirectory.Trim().ToLowerInvariant();
+        var bytes = Encoding.UTF8.GetBytes(normalized);
+        var hash = SHA256.HashData(bytes);
+
+        return Convert.ToHexString(hash[..8]).ToLowerInvariant();
     }
 
     private static string GetUniquePath(string preferredPath)

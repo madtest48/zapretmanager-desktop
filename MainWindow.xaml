@@ -854,6 +854,8 @@
                                 <Separator />
                                 <MenuItem Header="Откатить сборку"
                                           Command="{Binding RestorePreviousVersionCommand}" />
+                                <MenuItem Header="Проверить обновление программы"
+                                          Command="{Binding CheckManagerUpdateCommand}" />
                                 <Separator />
                                 <MenuItem Header="О программе..."
                                           Command="{Binding OpenAboutCommand}" />
@@ -904,8 +906,26 @@
                                 <Button Grid.Row="2" Grid.Column="0" Content="Выбрать папку" Margin="0" MinWidth="0" Command="{Binding BrowseCommand}" Style="{StaticResource ActionButtonStyle}" ToolTip="Выбрать рабочую папку zapret вручную." />
                                 <Button Grid.Row="2" Grid.Column="2" Content="Открыть" Margin="0" MinWidth="0" Command="{Binding OpenFolderCommand}" Style="{StaticResource ActionButtonStyle}" ToolTip="Открыть текущую папку zapret в проводнике." />
                                 <Button Grid.Row="4" Grid.Column="0" Content="Скачать zapret" Margin="0" MinWidth="0" Command="{Binding DownloadZapretCommand}" Style="{StaticResource ActionButtonStyle}" ToolTip="Скачать свежую сборку zapret в выбранную папку." />
-                    <Button Grid.Row="4" Grid.Column="2" Content="Удалить zapret" Margin="0" MinWidth="0" Command="{Binding DeleteZapretCommand}" Style="{StaticResource ActionButtonStyle}" ToolTip="Остановить процессы, удалить службу и удалить текущую установленную вместе с сохранённой предыдущей сборкой zapret." />
-                                <Button Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="3" Content="Автоматический режим" Margin="0" MinWidth="0" Command="{Binding AutoInstallCommand}" Style="{StaticResource PrimaryButtonStyle}" ToolTip="Если сборка уже выбрана, просто проверить конфиги и установить лучший как службу. Если сборки нет, сначала скачать свежий zapret." />
+                    <Button Grid.Row="4" Grid.Column="2" Content="Удалить zapret" Margin="0" MinWidth="0" Command="{Binding DeleteZapretCommand}" Style="{StaticResource ActionButtonStyle}">
+                        <Button.ToolTip>
+                            <ToolTip MaxWidth="260">
+                                <TextBlock TextWrapping="Wrap"
+                                           MaxWidth="240"
+                                           LineHeight="15"
+                                           Text="Остановить процессы, удалить службу и удалить текущую и предыдущую сборку zapret." />
+                            </ToolTip>
+                        </Button.ToolTip>
+                    </Button>
+                                <Button Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="3" Content="Автоматический режим" Margin="0" MinWidth="0" Command="{Binding AutoInstallCommand}" Style="{StaticResource PrimaryButtonStyle}">
+                                    <Button.ToolTip>
+                                        <ToolTip MaxWidth="260">
+                                            <TextBlock TextWrapping="Wrap"
+                                                       MaxWidth="240"
+                                                       LineHeight="15"
+                                                       Text="Если сборка уже выбрана, программа проверит конфиги и поставит лучший вариант как службу. Если сборки нет, сначала скачает свежий zapret." />
+                                        </ToolTip>
+                                    </Button.ToolTip>
+                                </Button>
                             </Grid>
                         </StackPanel>
                     </Border>
@@ -1004,7 +1024,7 @@
                                         Content="Применить"
                                         Command="{Binding ApplyGameModeCommand}"
                                         Style="{StaticResource PrimaryButtonStyle}"
-                                        ToolTip="Сохранить игровой режим и перезапустить активный профиль или службу." />
+                                        ToolTip="Сохранить игровой режим&#10;и перезапустить активный профиль или службу." />
                             </Grid>
 
                             <Rectangle Height="1" Fill="{DynamicResource CardEdgeBrush}" Margin="0,10,0,10" />
@@ -1021,13 +1041,13 @@
                                         MinWidth="0"
                                         Command="{Binding InstallServiceCommand}"
                                         Style="{StaticResource PrimaryButtonStyle}"
-                                        ToolTip="Установить выбранный конфиг как службу Windows с автозапуском." />
+                                        ToolTip="Установить выбранный конфиг&#10;как службу Windows с автозапуском." />
                                 <Button Content="Удалить службу"
                                         Margin="8,0,0,0"
                                         MinWidth="0"
                                         Command="{Binding RemoveServiceCommand}"
                                         Style="{StaticResource ActionButtonStyle}"
-                                        ToolTip="Удалить службу zapret и остановить её, если она запущена." />
+                                        ToolTip="Удалить службу zapret&#10;и остановить её, если она запущена." />
                             </UniformGrid>
 
                             <Rectangle Height="1" Fill="{DynamicResource CardEdgeBrush}" Margin="0,6,0,8" />
@@ -1208,7 +1228,7 @@
                                             Content="{Binding ProbeButtonText}"
                                             Command="{Binding RunTestsCommand}"
                                             Style="{StaticResource PrimaryButtonStyle}"
-                                            ToolTip="Запустить проверку всех конфигов по выбранным адресам." />
+                                        ToolTip="Запустить проверку всех конфигов&#10;по выбранным адресам." />
                                 </Grid>
                             </StackPanel>
                         </Border>
@@ -1257,13 +1277,13 @@
                                             MinWidth="0"
                                             Command="{Binding StopCommand}"
                                             Style="{StaticResource ActionButtonStyle}"
-                                            ToolTip="Остановить вручную запущенный профиль. Установленная служба этой кнопкой не трогается." />
+                                            ToolTip="Остановить вручную запущенный профиль.&#10;Установленная служба этой кнопкой не трогается." />
                                     <Button Content="Скрыть выбранный"
                                             Margin="0,0,0,0"
                                             MinWidth="0"
                                             Command="{Binding HideSelectedConfigCommand}"
                                             Style="{StaticResource ActionButtonStyle}"
-                                            ToolTip="Убрать выбранный конфиг из основного списка и исключить его из проверки." />
+                                            ToolTip="Убрать выбранный конфиг из основного списка&#10;и исключить его из проверки." />
                                 </UniformGrid>
                             </Grid>
                         </Border>

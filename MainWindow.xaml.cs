@@ -299,6 +299,8 @@ public partial class MainWindow : Window
 
     private void NormalizeToolTips(DependencyObject root)
     {
+        var sharedToolTipStyle = System.Windows.Application.Current.TryFindResource(typeof(System.Windows.Controls.ToolTip)) as Style;
+
         foreach (var element in EnumerateVisualTree(root).OfType<FrameworkElement>())
         {
             if (element.ToolTip is null)
@@ -309,15 +311,34 @@ public partial class MainWindow : Window
             if (element.ToolTip is System.Windows.Controls.ToolTip toolTip)
             {
                 toolTip.StaysOpen = false;
+                toolTip.Style ??= sharedToolTipStyle;
+                toolTip.MaxWidth = 260;
+                if (toolTip.Content is string text)
+                {
+                    toolTip.Content = CreateWrappedToolTipTextBlock(text);
+                }
                 continue;
             }
 
             element.ToolTip = new System.Windows.Controls.ToolTip
             {
-                Content = element.ToolTip,
-                StaysOpen = false
+                Content = CreateWrappedToolTipTextBlock(element.ToolTip.ToString() ?? string.Empty),
+                StaysOpen = false,
+                Style = sharedToolTipStyle,
+                MaxWidth = 260
             };
         }
+    }
+
+    private static TextBlock CreateWrappedToolTipTextBlock(string text)
+    {
+        return new TextBlock
+        {
+            Text = text,
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth = 240,
+            LineHeight = 15
+        };
     }
 
     private static IEnumerable<DependencyObject> EnumerateVisualTree(DependencyObject root)
@@ -696,6 +717,11 @@ public partial class MainWindow : Window
         System.Windows.Application.Current.Shutdown();
     }
 
+    public void ShutdownForManagerUpdate()
+    {
+        ShutdownApplication();
+    }
+
     private void ThemeButton_Click(object sender, RoutedEventArgs e)
     {
         if (DataContext is not MainViewModel viewModel)
@@ -755,8 +781,22 @@ public partial class MainWindow : Window
     private void SetBrushColor(string resourceKey, string hex)
     {
         var color = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(hex);
+        UpdateBrushColor(Resources, resourceKey, color);
 
-        if (Resources[resourceKey] is SolidColorBrush brush)
+        if (resourceKey.StartsWith("Tooltip", StringComparison.Ordinal))
+        {
+            UpdateBrushColor(System.Windows.Application.Current?.Resources, resourceKey, color);
+        }
+    }
+
+    private static void UpdateBrushColor(ResourceDictionary? resources, string resourceKey, System.Windows.Media.Color color)
+    {
+        if (resources is null)
+        {
+            return;
+        }
+
+        if (resources[resourceKey] is SolidColorBrush brush)
         {
             if (brush.Color == color)
             {
@@ -767,7 +807,7 @@ public partial class MainWindow : Window
             {
                 var clone = brush.CloneCurrentValue();
                 clone.Color = color;
-                Resources[resourceKey] = clone;
+                resources[resourceKey] = clone;
                 return;
             }
 
@@ -775,7 +815,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        Resources[resourceKey] = new SolidColorBrush(color);
+        resources[resourceKey] = new SolidColorBrush(color);
     }
 
     private void ApplyWindowFrame(bool useLightTheme)

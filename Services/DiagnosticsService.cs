@@ -1,4 +1,7 @@
 using System.Diagnostics;
+using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using Microsoft.Win32;
 using ZapretManager.Models;
 
@@ -7,36 +10,96 @@ namespace ZapretManager.Services;
 public sealed class DiagnosticsService
 {
     private static readonly string[] ConflictingBypassServices = ["GoodbyeDPI", "discordfix_zapret", "winws1", "winws2"];
+    private static readonly string[] VpnMarkers =
+    [
+        "VPN",
+        "HAPP",
+        "WINTUN",
+        "WIREGUARD",
+        "OPENVPN",
+        "TAP",
+        "TUN",
+        "TAILSCALE",
+        "ZEROTIER",
+        "AMNEZIA",
+        "OUTLINE",
+        "TUN2SOCKS",
+        "RADMIN"
+    ];
 
-    public async Task<DiagnosticsReport> RunAsync(ZapretInstallation? installation, CancellationToken cancellationToken = default)
+    public async Task<DiagnosticsReport> RunAsync(
+        ZapretInstallation? installation,
+        IProgress<DiagnosticsProgressUpdate>? progress = null,
+        CancellationToken cancellationToken = default)
     {
         var items = new List<DiagnosticsCheckItem>();
-        items.Add(CheckBaseFilteringEngine());
-        items.Add(CheckProxy());
+        var totalChecks = installation is not null ? 14 : 13;
 
-        var tcpCheck = await CheckTcpTimestampsAsync(cancellationToken);
-        items.Add(tcpCheck.Item);
+        void ReportStatus(string text)
+        {
+            progress?.Report(new DiagnosticsProgressUpdate
+            {
+                StatusText = text,
+                CompletedChecks = items.Count,
+                TotalChecks = totalChecks
+            });
+        }
 
-        items.Add(CheckAdguard());
-        items.Add(CheckKillerServices());
-        items.Add(CheckIntelConnectivity());
-        items.Add(CheckCheckPoint());
-        items.Add(CheckSmartByte());
+        void AddItem(DiagnosticsCheckItem item)
+        {
+            items.Add(item);
+            progress?.Report(new DiagnosticsProgressUpdate
+            {
+                StatusText = $"Проверено {items.Count} из {totalChecks}: {item.Title}",
+                Item = item,
+                CompletedChecks = items.Count,
+                TotalChecks = totalChecks
+            });
+        }
+
+        async Task RunCheckAsync(string statusText, Func<DiagnosticsCheckItem> check)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ReportStatus(statusText);
+            var item = await Task.Run(check, cancellationToken);
+            AddItem(item);
+        }
+
+        async Task<T> RunStepAsync<T>(string statusText, Func<T> step)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ReportStatus(statusText);
+            return await Task.Run(step, cancellationToken);
+        }
+
+        await RunCheckAsync("Проверяем Base Filtering Engine...", CheckBaseFilteringEngine);
+        await RunCheckAsync("Проверяем системный прокси...", CheckProxy);
+        await RunCheckAsync("Проверяем Adguard...", CheckAdguard);
+        await RunCheckAsync("Проверяем Killer...", CheckKillerServices);
+        await RunCheckAsync("Проверяем Intel Connectivity...", CheckIntelConnectivity);
+        await RunCheckAsync("Проверяем Check Point...", CheckCheckPoint);
+        await RunCheckAsync("Проверяем SmartByte...", CheckSmartByte);
 
         if (installation is not null)
         {
-            items.Add(CheckWinDivertDriverFile(installation));
+            await RunCheckAsync("Проверяем драйвер WinDivert...", () => CheckWinDivertDriverFile(installation));
         }
 
-        items.Add(CheckVpnServices());
-        items.Add(CheckSecureDns());
-        items.Add(CheckHostsFile());
+        await RunCheckAsync("Проверяем VPN...", CheckVpnServices);
+        await RunCheckAsync("Проверяем Secure DNS...", CheckSecureDns);
+        await RunCheckAsync("Проверяем hosts...", CheckHostsFile);
 
-        var staleWinDivertCheck = CheckStaleWinDivert();
-        items.Add(staleWinDivertCheck.Item);
+        var tcpCheck = await RunStepAsync("Проверяем TCP timestamps...", () =>
+            CheckTcpTimestampsAsync(cancellationToken).GetAwaiter().GetResult());
+        AddItem(tcpCheck.Item);
 
-        var conflictingServicesCheck = CheckConflictingServices();
-        items.Add(conflictingServicesCheck.Item);
+        var staleWinDivertCheck = await RunStepAsync("Проверяем подвисший WinDivert...", CheckStaleWinDivert);
+        AddItem(staleWinDivertCheck.Item);
+
+        var conflictingServicesCheck = await RunStepAsync("Проверяем конфликтующие bypass-службы...", CheckConflictingServices);
+        AddItem(conflictingServicesCheck.Item);
+
+        ReportStatus("Диагностика завершена.");
 
         return new DiagnosticsReport
         {
@@ -245,20 +308,134 @@ public sealed class DiagnosticsService
 
     private static DiagnosticsCheckItem CheckVpnServices()
     {
-        var found = GetServices()
-            .Where(service => ContainsIgnoreCase(service.ServiceName, "VPN") || ContainsIgnoreCase(service.DisplayName, "VPN"))
-            .Select(service => service.DisplayName)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+        var activeAdapters = GetActiveVpnAdapterMatches();
+        var componentMatches = GetVpnComponentMatches();
 
         return new DiagnosticsCheckItem
         {
             Title = "VPN",
-            Severity = found.Length > 0 ? DiagnosticsSeverity.Warning : DiagnosticsSeverity.Success,
-            Message = found.Length > 0
-                ? $"Найдены VPN-службы: {string.Join(", ", found)}. Убедись, что они выключены."
-                : "VPN-службы не обнаружены."
+            Severity = activeAdapters.Length > 0 ? DiagnosticsSeverity.Warning : DiagnosticsSeverity.Success,
+            Message = activeAdapters.Length > 0
+                ? "Обнаружен активный VPN."
+                : "Активный VPN не обнаружен.",
+            Details = activeAdapters.Length > 0
+                ? $"Обнаружен активный VPN: {string.Join(", ", activeAdapters)}. На время проверки и работы zapret лучше отключить VPN."
+                : componentMatches.Length > 0
+                    ? $"Активный VPN не обнаружен. В системе есть установленные VPN-компоненты: {string.Join(", ", componentMatches)}."
+                    : null
         };
+    }
+
+    private static string[] GetActiveVpnAdapterMatches()
+    {
+        try
+        {
+            return NetworkInterface.GetAllNetworkInterfaces()
+                .Where(adapter =>
+                    adapter.OperationalStatus == OperationalStatus.Up &&
+                    IsVpnLikeAdapter(adapter) &&
+                    HasActiveVpnAddressing(adapter))
+                .Select(adapter => $"адаптер {adapter.Name}")
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static string[] GetVpnComponentMatches()
+    {
+        try
+        {
+            var serviceMatches = GetServices()
+                .Where(service => MatchesVpnSignature(service.ServiceName) || MatchesVpnSignature(service.DisplayName))
+                .Select(service => $"служба {service.DisplayName}")
+                .Distinct(StringComparer.OrdinalIgnoreCase);
+
+            var adapterMatches = NetworkInterface.GetAllNetworkInterfaces()
+                .Where(IsVpnLikeAdapter)
+                .Select(adapter => $"адаптер {adapter.Name}")
+                .Distinct(StringComparer.OrdinalIgnoreCase);
+
+            return serviceMatches
+                .Concat(adapterMatches)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static bool IsVpnLikeAdapter(NetworkInterface adapter)
+    {
+        return adapter.NetworkInterfaceType == NetworkInterfaceType.Tunnel ||
+               MatchesVpnSignature(adapter.Name) ||
+               MatchesVpnSignature(adapter.Description);
+    }
+
+    private static bool HasActiveVpnAddressing(NetworkInterface adapter)
+    {
+        try
+        {
+            var properties = adapter.GetIPProperties();
+            var hasUsableAddress = properties.UnicastAddresses.Any(address =>
+            {
+                var ip = address.Address;
+                if (IPAddress.IsLoopback(ip))
+                {
+                    return false;
+                }
+
+                if (ip.AddressFamily == AddressFamily.InterNetwork)
+                {
+                    var bytes = ip.GetAddressBytes();
+                    return !(bytes[0] == 169 && bytes[1] == 254);
+                }
+
+                if (ip.AddressFamily == AddressFamily.InterNetworkV6)
+                {
+                    return !ip.IsIPv6LinkLocal;
+                }
+
+                return false;
+            });
+
+            if (!hasUsableAddress)
+            {
+                return false;
+            }
+
+            var hasGateway = properties.GatewayAddresses.Any(gateway =>
+                gateway.Address.AddressFamily is AddressFamily.InterNetwork or AddressFamily.InterNetworkV6 &&
+                !gateway.Address.Equals(IPAddress.Any) &&
+                !gateway.Address.Equals(IPAddress.IPv6Any) &&
+                !gateway.Address.Equals(IPAddress.None) &&
+                !gateway.Address.Equals(IPAddress.IPv6None));
+
+            var hasDns = properties.DnsAddresses.Any(address =>
+                address.AddressFamily is AddressFamily.InterNetwork or AddressFamily.InterNetworkV6 &&
+                !IPAddress.IsLoopback(address));
+
+            return hasGateway || hasDns;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool MatchesVpnSignature(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        return VpnMarkers.Any(marker => ContainsIgnoreCase(value, marker));
     }
 
     private static DiagnosticsCheckItem CheckSecureDns()
@@ -450,15 +627,16 @@ public sealed class DiagnosticsService
             }
 
             var services = new List<(string ServiceName, string DisplayName)>();
-            string? currentName = null;
             foreach (var rawLine in output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
             {
                 var line = rawLine.Trim();
-                if (line.StartsWith("SERVICE_NAME:", StringComparison.OrdinalIgnoreCase))
+                if (!line.StartsWith("SERVICE_NAME:", StringComparison.OrdinalIgnoreCase))
                 {
-                    currentName = line["SERVICE_NAME:".Length..].Trim();
-                    services.Add((currentName, currentName));
+                    continue;
                 }
+
+                var serviceName = line["SERVICE_NAME:".Length..].Trim();
+                services.Add((serviceName, GetServiceDisplayName(serviceName)));
             }
 
             return [.. services];
@@ -466,6 +644,49 @@ public sealed class DiagnosticsService
         catch
         {
             return [];
+        }
+    }
+
+    private static string GetServiceDisplayName(string serviceName)
+    {
+        try
+        {
+            using var process = new Process
+            {
+                StartInfo = new ProcessStartInfo("sc.exe", $"getdisplayname \"{serviceName}\"")
+                {
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                }
+            };
+
+            process.Start();
+            var output = process.StandardOutput.ReadToEnd();
+            process.WaitForExit();
+            if (process.ExitCode != 0)
+            {
+                return serviceName;
+            }
+
+            var displayNameLine = output
+                .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+                .FirstOrDefault(line => line.Contains("NAME =", StringComparison.OrdinalIgnoreCase));
+
+            if (string.IsNullOrWhiteSpace(displayNameLine))
+            {
+                return serviceName;
+            }
+
+            var separatorIndex = displayNameLine.IndexOf('=');
+            return separatorIndex >= 0
+                ? displayNameLine[(separatorIndex + 1)..].Trim()
+                : serviceName;
+        }
+        catch
+        {
+            return serviceName;
         }
     }
 

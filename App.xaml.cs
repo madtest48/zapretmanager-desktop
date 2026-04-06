@@ -3,6 +3,8 @@ using ZapretManager.Services;
 using ZapretManager.ViewModels;
 using System.Text;
 using System.Threading;
+using System.Windows.Threading;
+using Forms = System.Windows.Forms;
 
 namespace ZapretManager;
 
@@ -21,6 +23,8 @@ public partial class App : System.Windows.Application
         base.OnStartup(e);
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        DispatcherUnhandledException += App_DispatcherUnhandledException;
+        Forms.Application.ThreadException += Application_ThreadException;
 
         if (e.Args.Length > 0)
         {
@@ -35,7 +39,7 @@ public partial class App : System.Windows.Application
             }
             catch (Exception ex)
             {
-                DialogService.ShowError(ex.Message, "Zapret Manager");
+                DialogService.ShowError(ex, "Zapret Manager");
                 Shutdown(1);
                 return;
             }
@@ -68,6 +72,8 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        DispatcherUnhandledException -= App_DispatcherUnhandledException;
+        Forms.Application.ThreadException -= Application_ThreadException;
         _activateEventRegistration?.Unregister(null);
         _activateEvent?.Dispose();
 
@@ -106,5 +112,16 @@ public partial class App : System.Windows.Application
             executeOnlyOnce: false);
 
         return true;
+    }
+
+    private void App_DispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
+    {
+        DialogService.ShowError(e.Exception, "Zapret Manager");
+        e.Handled = true;
+    }
+
+    private void Application_ThreadException(object sender, ThreadExceptionEventArgs e)
+    {
+        DialogService.ShowError(e.Exception, "Zapret Manager");
     }
 }

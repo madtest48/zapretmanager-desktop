@@ -9,3 +9,11 @@ public sealed class DiagnosticsReport
     public bool HasAnyErrors => Items.Any(item => item.Severity == DiagnosticsSeverity.Error);
     public bool HasAnyWarnings => Items.Any(item => item.Severity == DiagnosticsSeverity.Warning);
 }
+
+public sealed class DiagnosticsProgressUpdate
+{
+    public required string StatusText { get; init; }
+    public DiagnosticsCheckItem? Item { get; init; }
+    public int CompletedChecks { get; init; }
+    public int TotalChecks { get; init; }
+}

@@ -36,6 +36,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly DnsService _dnsService = new();
     private readonly DnsDiagnosisService _dnsDiagnosisService = new();
     private readonly DiagnosticsService _diagnosticsService = new();
+    private readonly ManagerUpdateService _managerUpdateService = new();
     private readonly AppSettings _settings;
     private readonly Dictionary<string, ConfigProbeResult> _probeResults = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, TargetGroupDefinition> _builtInTargetGroups = CreateBuiltInTargetGroups()
@@ -94,6 +95,7 @@ public sealed class MainViewModel : ObservableObject
     private ProbeDetailsWindow? _probeDetailsWindow;
     private DiagnosticsWindow? _diagnosticsWindow;
     private readonly HashSet<Window> _openAuxiliaryWindows = [];
+    private const string ManagerMovedMessage = "Файл ZapretManager был перемещён после запуска. Закройте программу через трей или Диспетчер задач и откройте её заново из новой папки.";
 
     public MainViewModel()
     {
@@ -162,6 +164,7 @@ public sealed class MainViewModel : ObservableObject
         CheckUpdatesCommand = new AsyncRelayCommand(() => CheckUpdatesAsync(true), () => _installation is not null && !IsBusy);
         ApplyUpdateCommand = new AsyncRelayCommand(() => ApplyUpdateAsync(), () => _installation is not null && HasUpdate && !IsBusy);
         RestorePreviousVersionCommand = new AsyncRelayCommand(RestorePreviousVersionAsync, () => _installation is not null && HasPreviousVersion && !IsBusy && !IsProbeRunning);
+        CheckManagerUpdateCommand = new AsyncRelayCommand(CheckManagerUpdateAsync, () => !IsBusy && !IsProbeRunning);
         ApplyGameModeCommand = new AsyncRelayCommand(ApplyGameModeAsync, () => _installation is not null && SelectedGameMode is not null && !IsBusy);
         UseDefaultTargetsCommand = new RelayCommand(UseDefaultTargets, () => !IsBusy);
         UseYouTubePresetCommand = new RelayCommand(() => UseTargetGroupPreset("youtube"), () => !IsBusy);
@@ -208,6 +211,7 @@ public sealed class MainViewModel : ObservableObject
     public AsyncRelayCommand CheckUpdatesCommand { get; }
     public AsyncRelayCommand ApplyUpdateCommand { get; }
     public AsyncRelayCommand RestorePreviousVersionCommand { get; }
+    public AsyncRelayCommand CheckManagerUpdateCommand { get; }
     public AsyncRelayCommand ApplyGameModeCommand { get; }
 
     public string InstallationPath
@@ -1148,6 +1152,104 @@ public sealed class MainViewModel : ObservableObject
         await ShowAuxiliaryWindowAsync(window, () => false);
     }
 
+    private async Task CheckManagerUpdateAsync()
+    {
+        EnsureManagerExecutableAvailable();
+
+        ManagerUpdateInfo? updateInfo = null;
+        await RunBusyAsync(async () =>
+        {
+            LastActionText = "Действие: проверяем обновление программы";
+            updateInfo = await _managerUpdateService.GetUpdateInfoAsync(_managerVersion);
+        });
+
+        if (updateInfo is null)
+        {
+            return;
+        }
+
+        if (!updateInfo.IsUpdateAvailable)
+        {
+            DialogService.ShowInfo("Новых обновлений программы не найдено.", "Zapret Manager");
+            LastActionText = $"Действие: обновлений программы нет, версия {_managerVersion} актуальна";
+            return;
+        }
+
+        var mayRequireElevation = DirectoryMayRequireElevation();
+        var promptMessage =
+            $"Найдена новая версия программы: {updateInfo.LatestVersion}.{Environment.NewLine}" +
+            $"Текущая версия: {_managerVersion}.{Environment.NewLine}{Environment.NewLine}" +
+            "Скачать и установить её сейчас? Программа будет полностью закрыта и откроется снова после обновления." +
+            (mayRequireElevation
+                ? $"{Environment.NewLine}{Environment.NewLine}Если программа лежит в защищённой папке, Windows может попросить подтверждение прав администратора."
+                : string.Empty);
+
+        var shouldInstall = DialogService.ConfirmCustom(
+            promptMessage,
+            "Zapret Manager",
+            primaryButtonText: "Обновить",
+            secondaryButtonText: "Позже");
+
+        if (!shouldInstall)
+        {
+            LastActionText = "Действие: обновление программы отложено";
+            return;
+        }
+
+        var currentProcessPath = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName;
+        if (string.IsNullOrWhiteSpace(currentProcessPath))
+        {
+            throw new InvalidOperationException("Не удалось определить путь к ZapretManager.");
+        }
+
+        currentProcessPath = Path.GetFullPath(currentProcessPath);
+        string? downloadedPath = null;
+        await RunBusyAsync(async () =>
+        {
+            LastActionText = $"Действие: скачиваем обновление программы {updateInfo.LatestVersion}";
+            downloadedPath = await _managerUpdateService.DownloadUpdateAsync(
+                updateInfo.DownloadUrl!,
+                updateInfo.AssetFileName,
+                updateInfo.LatestVersion);
+        });
+
+        if (string.IsNullOrWhiteSpace(downloadedPath))
+        {
+            return;
+        }
+
+        try
+        {
+            LastActionText = $"Действие: подготавливаем установку обновления программы {updateInfo.LatestVersion}";
+            await _managerUpdateService.LaunchPreparedUpdateAsync(
+                downloadedPath,
+                currentProcessPath,
+                Process.GetCurrentProcess().Id);
+        }
+        catch (OperationCanceledException)
+        {
+            LastActionText = "Действие: обновление программы отменено";
+            ShowInlineNotification("Обновление программы отменено.", isError: true);
+            return;
+        }
+        catch (Exception ex)
+        {
+            var displayMessage = DialogService.GetDisplayMessage(ex);
+            LastActionText = $"Действие: ошибка - {displayMessage}";
+            DialogService.ShowError(displayMessage, "Zapret Manager");
+            return;
+        }
+
+        LastActionText = $"Действие: перезапускаем ZapretManager для обновления до {updateInfo.LatestVersion}";
+        if (System.Windows.Application.Current?.MainWindow is MainWindow mainWindow)
+        {
+            mainWindow.ShutdownForManagerUpdate();
+            return;
+        }
+
+        System.Windows.Application.Current?.Shutdown();
+    }
+
     private async Task OpenIpSetModeWindowAsync()
     {
         if (_installation is null)
@@ -1210,42 +1312,44 @@ public sealed class MainViewModel : ObservableObject
 
     public async Task OpenDnsSettingsAsync()
     {
-        LastActionText = "Действие: открываем настройки DNS";
-        var selectedProfileKey = GetCurrentDnsProfileKey();
-
-        var dialog = new DnsSettingsWindow(
-            _dnsService.GetPresetDefinitions(_settings.CustomDnsPrimary, _settings.CustomDnsSecondary, _settings.CustomDnsDohTemplate),
-            selectedProfileKey,
-            _settings.CustomDnsPrimary,
-            _settings.CustomDnsSecondary,
-            _settings.DnsOverHttpsEnabled,
-            _settings.CustomDnsDohTemplate,
-            UseLightThemeEnabled);
-
-        if (System.Windows.Application.Current?.MainWindow is Window owner && owner.IsLoaded && owner.IsVisible)
+        try
         {
-            dialog.Owner = owner;
-        }
+            EnsureManagerExecutableAvailable();
+            LastActionText = "Действие: открываем настройки DNS";
+            var selectedProfileKey = GetCurrentDnsProfileKey();
 
-        if (!await ShowAuxiliaryWindowAsync(dialog, () => dialog.WasApplied))
+            var dialog = new DnsSettingsWindow(
+                _dnsService.GetPresetDefinitions(_settings.CustomDnsPrimary, _settings.CustomDnsSecondary, _settings.CustomDnsDohTemplate),
+                selectedProfileKey,
+                _settings.CustomDnsPrimary,
+                _settings.CustomDnsSecondary,
+                _settings.DnsOverHttpsEnabled,
+                _settings.CustomDnsDohTemplate,
+                UseLightThemeEnabled);
+
+            if (!await ShowAuxiliaryWindowAsync(dialog, () => dialog.WasApplied))
+            {
+                return;
+            }
+
+            _settings.CustomDnsPrimary = dialog.CustomPrimary;
+            _settings.CustomDnsSecondary = dialog.CustomSecondary;
+            _settings.CustomDnsDohTemplate = dialog.CustomDohTemplate;
+            _settings.DnsOverHttpsEnabled = dialog.UseDnsOverHttps;
+            _settingsService.Save(_settings);
+
+            await ApplyDnsProfileAsync(
+                dialog.SelectedProfileKey,
+                dialog.CustomPrimary,
+                dialog.CustomSecondary,
+                dialog.UseDnsOverHttps,
+                dialog.CustomDohTemplate);
+        }
+        catch (Exception ex)
         {
-            return;
+            LastActionText = "Действие: не удалось открыть настройки DNS";
+            DialogService.ShowError(ex, "Zapret Manager");
         }
-
-        _settings.CustomDnsPrimary = dialog.CustomPrimary;
-        _settings.CustomDnsSecondary = dialog.CustomSecondary;
-        _settings.CustomDnsDohTemplate = dialog.CustomDohTemplate;
-        _settings.DnsOverHttpsEnabled =
-            !string.Equals(dialog.SelectedProfileKey, DnsService.SystemProfileKey, StringComparison.OrdinalIgnoreCase) &&
-            dialog.UseDnsOverHttps;
-        _settingsService.Save(_settings);
-
-        await ApplyDnsProfileAsync(
-            dialog.SelectedProfileKey,
-            dialog.CustomPrimary,
-            dialog.CustomSecondary,
-            dialog.UseDnsOverHttps,
-            dialog.CustomDohTemplate);
     }
 
     public void OpenProbeDetails(ConfigTableRow? row)
@@ -1277,10 +1381,7 @@ public sealed class MainViewModel : ObservableObject
         }
 
         var window = new ProbeDetailsWindow(row.ConfigName, probeResult, UseLightThemeEnabled);
-        if (System.Windows.Application.Current?.MainWindow is Window owner && owner.IsLoaded && owner.IsVisible)
-        {
-            window.Owner = owner;
-        }
+        ConfigureAuxiliaryWindow(window);
 
         window.Closed += (_, _) =>
         {
@@ -1318,10 +1419,7 @@ public sealed class MainViewModel : ObservableObject
             }
 
             var window = new DiagnosticsWindow(_diagnosticsService, _installation, UseLightThemeEnabled);
-            if (System.Windows.Application.Current?.MainWindow is Window owner && owner.IsLoaded && owner.IsVisible)
-            {
-                window.Owner = owner;
-            }
+            ConfigureAuxiliaryWindow(window);
 
             window.Closed += (_, _) =>
             {
@@ -1372,6 +1470,7 @@ public sealed class MainViewModel : ObservableObject
 
         window.Closed += ClosedHandler;
         _openAuxiliaryWindows.Add(window);
+        ConfigureAuxiliaryWindow(window);
         window.Show();
         window.Activate();
 
@@ -1403,7 +1502,7 @@ public sealed class MainViewModel : ObservableObject
 
         owner.Dispatcher.BeginInvoke(() =>
         {
-            if (_openAuxiliaryWindows.Any(window => window.IsVisible) || !owner.IsVisible)
+            if (_openAuxiliaryWindows.Any(window => window.IsVisible) || !owner.IsLoaded)
             {
                 return;
             }
@@ -1413,13 +1512,27 @@ public sealed class MainViewModel : ObservableObject
                 owner.WindowState = WindowState.Normal;
             }
 
-            owner.ShowInTaskbar = true;
-            owner.Show();
+            if (!owner.IsVisible)
+            {
+                return;
+            }
+
             owner.Activate();
-            owner.Topmost = true;
-            owner.Topmost = false;
             owner.Focus();
         }, DispatcherPriority.ApplicationIdle);
+    }
+
+    private static void ConfigureAuxiliaryWindow(Window window)
+    {
+        if (System.Windows.Application.Current?.MainWindow is Window owner && owner.IsLoaded && owner.IsVisible)
+        {
+            window.Owner = owner;
+            window.WindowStartupLocation = WindowStartupLocation.CenterOwner;
+            return;
+        }
+
+        window.Owner = null;
+        window.WindowStartupLocation = WindowStartupLocation.CenterScreen;
     }
 
     public async Task ApplyDnsProfileFromTrayAsync(string profileKey)
@@ -1458,6 +1571,7 @@ public sealed class MainViewModel : ObservableObject
         bool useDnsOverHttps,
         string? customDohTemplate)
     {
+        var rememberedDohPreference = useDnsOverHttps;
         if (string.Equals(profileKey, DnsService.SystemProfileKey, StringComparison.OrdinalIgnoreCase))
         {
             useDnsOverHttps = false;
@@ -1478,7 +1592,7 @@ public sealed class MainViewModel : ObservableObject
             }, rethrowExceptions: true);
 
             _settings.PreferredDnsProfileKey = profileKey;
-            _settings.DnsOverHttpsEnabled = !string.Equals(profileKey, DnsService.SystemProfileKey, StringComparison.OrdinalIgnoreCase) && useDnsOverHttps;
+            _settings.DnsOverHttpsEnabled = rememberedDohPreference;
             _settingsService.Save(_settings);
             LastActionText = $"Действие: DNS изменён на {profileLabel}";
             ShowInlineNotification($"DNS изменён: {profileLabel}");
@@ -2051,7 +2165,7 @@ public sealed class MainViewModel : ObservableObject
         {
             failedWithException = true;
             LastActionText = "Действие: ошибка проверки конфигов";
-            DialogService.ShowError(ex.Message, "Zapret Manager");
+            DialogService.ShowError(ex, "Zapret Manager");
         }
         finally
         {
@@ -2419,6 +2533,17 @@ public sealed class MainViewModel : ObservableObject
         if (IsProbeRunning)
         {
             CancelProbe();
+            return;
+        }
+
+        try
+        {
+            EnsureManagerExecutableAvailable();
+        }
+        catch (Exception ex)
+        {
+            LastActionText = "Действие: проверка недоступна после переноса программы";
+            DialogService.ShowError(ex, "Zapret Manager");
             return;
         }
 
@@ -3179,13 +3304,14 @@ public sealed class MainViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            LastActionText = $"Действие: ошибка - {ex.Message}";
+            var displayMessage = DialogService.GetDisplayMessage(ex);
+            LastActionText = $"Действие: ошибка - {displayMessage}";
             if (rethrowExceptions)
             {
                 throw;
             }
 
-            DialogService.ShowError(ex.Message, "Zapret Manager");
+            DialogService.ShowError(displayMessage, "Zapret Manager");
         }
         finally
         {
@@ -3305,6 +3431,7 @@ public sealed class MainViewModel : ObservableObject
         OpenDnsSettingsCommand.NotifyCanExecuteChanged();
         OpenDiagnosticsCommand.NotifyCanExecuteChanged();
         OpenAboutCommand.NotifyCanExecuteChanged();
+        CheckManagerUpdateCommand.NotifyCanExecuteChanged();
         UpdateIpSetListCommand.NotifyCanExecuteChanged();
         UpdateHostsFileCommand.NotifyCanExecuteChanged();
         ClearDiscordCacheCommand.NotifyCanExecuteChanged();
@@ -3816,25 +3943,47 @@ public sealed class MainViewModel : ObservableObject
             throw new InvalidOperationException("Не удалось определить путь к Zapret Manager.");
         }
 
+        processPath = Path.GetFullPath(processPath);
+        if (!File.Exists(processPath))
+        {
+            throw new InvalidOperationException("Файл ZapretManager был перемещён после запуска. Закройте программу и откройте её заново из новой папки.");
+        }
+
+        var workingDirectory = Path.GetDirectoryName(processPath);
+        if (string.IsNullOrWhiteSpace(workingDirectory) || !Directory.Exists(workingDirectory))
+        {
+            throw new InvalidOperationException("Не удалось определить рабочую папку ZapretManager. Закройте программу и откройте её заново.");
+        }
+
         var startInfo = new ProcessStartInfo
         {
             FileName = processPath,
             Arguments = string.Join(" ", arguments.Select(QuoteArgument)),
-            WorkingDirectory = Path.GetDirectoryName(processPath),
+            WorkingDirectory = workingDirectory,
             UseShellExecute = true,
             Verb = "runas"
         };
 
-        using var process = Process.Start(startInfo)
+        Process? process;
+        try
+        {
+            process = Process.Start(startInfo);
+        }
+        catch (Win32Exception ex) when (ex.NativeErrorCode == 2)
+        {
+            throw new InvalidOperationException("Файл ZapretManager был перемещён после запуска. Закройте программу и откройте её заново из новой папки.", ex);
+        }
+
+        using var elevatedProcess = process
             ?? throw new InvalidOperationException("Не удалось запустить административную операцию.");
 
         try
         {
-            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(30));
+            await elevatedProcess.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(30));
         }
         catch (TimeoutException)
         {
-            TryKillProcess(process);
+            TryKillProcess(elevatedProcess);
             throw new TimeoutException("Системная операция изменения DNS зависла и была остановлена.");
         }
 
@@ -3845,10 +3994,10 @@ public sealed class MainViewModel : ObservableObject
             TryDeleteFile(resultFilePath);
         }
 
-        if (process.ExitCode != 0)
+        if (elevatedProcess.ExitCode != 0)
         {
             throw new InvalidOperationException(string.IsNullOrWhiteSpace(resultMessage)
-                ? $"Системная операция завершилась с кодом {process.ExitCode}."
+                ? $"Системная операция завершилась с кодом {elevatedProcess.ExitCode}."
                 : resultMessage.Trim());
         }
     }
@@ -3951,6 +4100,50 @@ public sealed class MainViewModel : ObservableObject
         }
 
         return "1.0";
+    }
+
+    private static void EnsureManagerExecutableAvailable()
+    {
+        var processPath = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName;
+        if (string.IsNullOrWhiteSpace(processPath))
+        {
+            throw new InvalidOperationException("Не удалось определить путь к ZapretManager.");
+        }
+
+        if (!File.Exists(Path.GetFullPath(processPath)))
+        {
+            throw new InvalidOperationException(ManagerMovedMessage);
+        }
+    }
+
+    private static bool DirectoryMayRequireElevation()
+    {
+        var processPath = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName;
+        if (string.IsNullOrWhiteSpace(processPath))
+        {
+            return false;
+        }
+
+        var directory = Path.GetDirectoryName(Path.GetFullPath(processPath));
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return false;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(directory);
+            var testFilePath = Path.Combine(directory, $".zapretmanager-write-test-{Guid.NewGuid():N}.tmp");
+            using (File.Create(testFilePath, 1, FileOptions.DeleteOnClose))
+            {
+            }
+
+            return false;
+        }
+        catch
+        {
+            return true;
+        }
     }
 
     private static string TrimActionPrefix(string? text)

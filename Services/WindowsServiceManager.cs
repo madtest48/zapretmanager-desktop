@@ -40,6 +40,8 @@ public sealed class WindowsServiceManager
 
         await RunHiddenAsync("netsh.exe", ["interface", "tcp", "set", "global", "timestamps=enabled"]);
         await EnsureServiceRemovedAsync(ServiceName, TimeSpan.FromSeconds(15));
+        await EnsureServiceRemovedAsync("WinDivert", TimeSpan.FromSeconds(10));
+        await EnsureServiceRemovedAsync("WinDivert14", TimeSpan.FromSeconds(10));
 
         ProcessRunResult create = new(1, string.Empty);
         for (var attempt = 0; attempt < 8; attempt++)
@@ -92,14 +94,16 @@ public sealed class WindowsServiceManager
         var start = await RunProcessAsync("sc.exe", ["start", ServiceName]);
         if (start.ExitCode != 0)
         {
-            throw new InvalidOperationException($"Служба установлена, но не запустилась.{Environment.NewLine}{start.Output}");
+            throw new InvalidOperationException(
+                $"Служба установлена, но не запустилась. Возможно, мешают остатки старой службы или WinDivert.{Environment.NewLine}{start.Output}");
         }
 
         await WaitForServiceStateAsync(ServiceName, shouldBeRunning: true, TimeSpan.FromSeconds(5));
         var statusOutput = RunHidden("sc.exe", $"query {ServiceName}");
         if (!statusOutput.Contains("RUNNING", StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException($"Служба создалась, но не осталась запущенной.{Environment.NewLine}{statusOutput}");
+            throw new InvalidOperationException(
+                $"Служба создалась, но не осталась запущенной. Возможно, мешают остатки старой службы или WinDivert.{Environment.NewLine}{statusOutput}");
         }
     }
 

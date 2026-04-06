@@ -141,11 +141,6 @@ public partial class DnsSettingsWindow : Window
         var selectedKey = ProfileComboBox.SelectedValue as string ?? DnsService.SystemProfileKey;
         var isSystem = string.Equals(selectedKey, DnsService.SystemProfileKey, StringComparison.OrdinalIgnoreCase);
         var isCustom = string.Equals(selectedKey, DnsService.CustomProfileKey, StringComparison.OrdinalIgnoreCase);
-        if (isSystem && UseDohCheckBox.IsChecked == true)
-        {
-            UseDohCheckBox.IsChecked = false;
-        }
-
         var useDoh = !isSystem && UseDohCheckBox.IsChecked == true;
 
         DnsInputsGrid.Visibility = isSystem ? Visibility.Collapsed : Visibility.Visible;

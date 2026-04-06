@@ -11,5 +11,6 @@ public sealed class DiagnosticsCheckItem
 {
     public required string Title { get; init; }
     public required string Message { get; init; }
+    public string? Details { get; init; }
     public DiagnosticsSeverity Severity { get; init; }
 }
