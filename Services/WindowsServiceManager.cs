@@ -82,6 +82,9 @@ public sealed class WindowsServiceManager
             throw new InvalidOperationException($"Не удалось установить службу.{Environment.NewLine}{create.Output}");
         }
 
+        await RunHiddenAsync("sc.exe", ["config", ServiceName, "start=", "delayed-auto"]);
+        await RunHiddenAsync("sc.exe", ["failure", ServiceName, "reset=", "86400", "actions=", "restart/60000/restart/120000/restart/180000"]);
+        await RunHiddenAsync("sc.exe", ["failureflag", ServiceName, "1"]);
         await RunHiddenAsync("sc.exe", ["description", ServiceName, "Zapret DPI bypass software"]);
         await RunHiddenAsync("reg.exe",
         [
