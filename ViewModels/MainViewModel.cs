@@ -555,6 +555,7 @@ public sealed class MainViewModel : ObservableObject
     public async Task InitializeAsync()
     {
         await RefreshAsync();
+        await TryMigrateInstalledServiceToCurrentVersionAsync();
 
         if (AutoCheckUpdatesEnabled)
         {
@@ -576,6 +577,77 @@ public sealed class MainViewModel : ObservableObject
         }
 
         await RefreshStatusAsync();
+    }
+
+    private async Task TryMigrateInstalledServiceToCurrentVersionAsync()
+    {
+        if (_installation is null)
+        {
+            return;
+        }
+
+        var currentProcessPath = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName;
+        if (string.IsNullOrWhiteSpace(currentProcessPath) || !File.Exists(currentProcessPath))
+        {
+            return;
+        }
+
+        currentProcessPath = Path.GetFullPath(currentProcessPath);
+        var serviceStatus = _serviceManager.GetStatus();
+        if (!serviceStatus.IsInstalled)
+        {
+            return;
+        }
+
+        var usesCurrentExecutable = _serviceManager.UsesExecutable(currentProcessPath);
+        var hasServiceHostArguments =
+            !string.IsNullOrWhiteSpace(serviceStatus.InstallationRootPath) &&
+            !string.IsNullOrWhiteSpace(serviceStatus.ProfileToken);
+        if (usesCurrentExecutable && hasServiceHostArguments)
+        {
+            return;
+        }
+
+        var migrationInstallation = _installation;
+        if (!string.IsNullOrWhiteSpace(serviceStatus.InstallationRootPath))
+        {
+            migrationInstallation = _discoveryService.TryLoad(serviceStatus.InstallationRootPath) ?? migrationInstallation;
+        }
+
+        if (migrationInstallation is null)
+        {
+            return;
+        }
+
+        var migrationProfile = FindProfileByIdentity(
+            migrationInstallation,
+            serviceStatus.ProfileName,
+            serviceStatus.ProfileToken);
+
+        if (migrationProfile is null)
+        {
+            LastActionText = "Действие: найдена старая служба, но профиль не удалось определить автоматически";
+            ShowInlineNotification(
+                "Обнаружена служба старой версии, но её профиль не удалось определить автоматически. Нажмите «Установить службу» один раз вручную.",
+                isError: true);
+            return;
+        }
+
+        await RunBusyAsync(async () =>
+        {
+            RuntimeStatus = "Обнаружена старая служба. Переносим её на текущую версию программы...";
+            LastActionText = $"Действие: переносим службу на текущую версию для {migrationProfile.Name}";
+
+            await _serviceManager.InstallAsync(migrationInstallation, migrationProfile, currentProcessPath);
+            _settings.LastInstallationPath = migrationInstallation.RootPath;
+            RememberInstalledServiceProfile(migrationProfile, saveImmediately: false);
+            _settingsService.Save(_settings);
+            _installation = migrationInstallation;
+            await Task.Delay(1200);
+            await RefreshLiveStatusCoreAsync();
+        });
+
+        ShowInlineNotification($"Служба автоматически перенесена на текущую версию программы: {migrationProfile.Name}");
     }
 
     public async Task RefreshStatusAsync()
