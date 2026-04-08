@@ -52,9 +52,11 @@ public sealed class WindowsServiceManager
     {
         var managerExecutablePath = GetManagerExecutablePath(serviceHostExecutablePath);
         var imagePath = BuildServiceBinaryPath(managerExecutablePath, installation.RootPath, profile.FileName);
+        var previousServiceExecutablePath = GetConfiguredExecutablePath();
 
         await RunHiddenAsync("netsh.exe", ["interface", "tcp", "set", "global", "timestamps=enabled"]);
-        await EnsureServiceRemovedAsync(ServiceName, TimeSpan.FromSeconds(15));
+        await EnsureServiceRemovedAsync(ServiceName, TimeSpan.FromSeconds(15), previousServiceExecutablePath);
+        await TerminateServiceHostProcessesAsync(previousServiceExecutablePath);
         await EnsureServiceRemovedAsync("WinDivert", TimeSpan.FromSeconds(10));
         await EnsureServiceRemovedAsync("WinDivert14", TimeSpan.FromSeconds(10));
 
@@ -141,7 +143,9 @@ public sealed class WindowsServiceManager
 
     public async Task RemoveAsync()
     {
-        await EnsureServiceRemovedAsync(ServiceName, TimeSpan.FromSeconds(15));
+        var configuredExecutablePath = GetConfiguredExecutablePath();
+        await EnsureServiceRemovedAsync(ServiceName, TimeSpan.FromSeconds(15), configuredExecutablePath);
+        await TerminateServiceHostProcessesAsync(configuredExecutablePath);
         await EnsureServiceRemovedAsync("WinDivert", TimeSpan.FromSeconds(10));
         await EnsureServiceRemovedAsync("WinDivert14", TimeSpan.FromSeconds(10));
     }
@@ -297,13 +301,14 @@ public sealed class WindowsServiceManager
         return result.Output;
     }
 
-    private static async Task EnsureServiceRemovedAsync(string serviceName, TimeSpan timeout)
+    private static async Task EnsureServiceRemovedAsync(string serviceName, TimeSpan timeout, string? configuredExecutablePath = null)
     {
         if (!ServiceExists(serviceName))
         {
             return;
         }
 
+        var serviceProcessId = await TryGetServiceProcessIdAsync(serviceName);
         var stopResult = await RunProcessAsync("sc.exe", ["stop", serviceName]);
         if (stopResult.ExitCode != 0 && !CanIgnoreStopFailure(stopResult.Output))
         {
@@ -313,7 +318,13 @@ public sealed class WindowsServiceManager
 
         if (!await WaitForServiceStoppedOrGoneAsync(serviceName, TimeSpan.FromSeconds(Math.Min(timeout.TotalSeconds, 10))))
         {
-            throw new InvalidOperationException($"Служба {serviceName} не остановилась вовремя перед удалением.");
+            await TerminateServiceProcessAsync(serviceProcessId);
+            await TerminateServiceProcessAsync(await TryGetServiceProcessIdAsync(serviceName));
+            await TerminateServiceHostProcessesAsync(configuredExecutablePath);
+            if (!await WaitForServiceStoppedOrGoneAsync(serviceName, TimeSpan.FromSeconds(5)))
+            {
+                throw new InvalidOperationException($"Служба {serviceName} не остановилась вовремя перед удалением.");
+            }
         }
 
         if (!ServiceExists(serviceName))
@@ -328,9 +339,116 @@ public sealed class WindowsServiceManager
                 $"Не удалось удалить службу {serviceName}.{Environment.NewLine}{deleteResult.Output}");
         }
 
+        await TerminateServiceProcessAsync(await TryGetServiceProcessIdAsync(serviceName));
+        await TerminateServiceHostProcessesAsync(configuredExecutablePath);
         if (!await WaitForServiceDeletionAsync(serviceName, timeout))
         {
             throw new InvalidOperationException($"Служба {serviceName} не была удалена вовремя.");
+        }
+    }
+
+    private static async Task<int?> TryGetServiceProcessIdAsync(string serviceName)
+    {
+        try
+        {
+            var result = await RunProcessAsync("sc.exe", ["queryex", serviceName]);
+            if (result.ExitCode != 0)
+            {
+                return null;
+            }
+
+            var match = Regex.Match(result.Output, @"PID\s*:\s*(?<pid>\d+)", RegexOptions.IgnoreCase);
+            if (!match.Success || !int.TryParse(match.Groups["pid"].Value, out var processId) || processId <= 0)
+            {
+                return null;
+            }
+
+            return processId;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static async Task TerminateServiceProcessAsync(int? processId)
+    {
+        if (processId is null || processId <= 0)
+        {
+            return;
+        }
+
+        try
+        {
+            using var process = Process.GetProcessById(processId.Value);
+            process.Kill(entireProcessTree: true);
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        catch
+        {
+        }
+    }
+
+    private static async Task TerminateServiceHostProcessesAsync(string? configuredExecutablePath)
+    {
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                Arguments = "-NoProfile -ExecutionPolicy Bypass -Command \"Get-CimInstance Win32_Process -Filter \\\"name = 'ZapretManager.exe'\\\" | ForEach-Object { '{0}|{1}|{2}' -f $_.ProcessId, ($_.ExecutablePath ?? ''), (($_.CommandLine ?? '') -replace '[\\r\\n]+', ' ') }\"",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            });
+
+            if (process is null)
+            {
+                return;
+            }
+
+            var output = await process.StandardOutput.ReadToEndAsync();
+            await process.WaitForExitAsync();
+
+            var configuredFullPath = string.IsNullOrWhiteSpace(configuredExecutablePath)
+                ? null
+                : Path.GetFullPath(configuredExecutablePath);
+
+            foreach (var line in output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+            {
+                var parts = line.Split('|', 3);
+                if (parts.Length != 3 || !int.TryParse(parts[0], out var processId))
+                {
+                    continue;
+                }
+
+                var executablePath = string.IsNullOrWhiteSpace(parts[1]) ? null : Path.GetFullPath(parts[1]);
+                var commandLine = parts[2];
+                var looksLikeServiceHost = commandLine.Contains(ServiceHostArgument, StringComparison.OrdinalIgnoreCase);
+                var matchesConfiguredExecutable =
+                    !string.IsNullOrWhiteSpace(configuredFullPath) &&
+                    !string.IsNullOrWhiteSpace(executablePath) &&
+                    string.Equals(executablePath, configuredFullPath, StringComparison.OrdinalIgnoreCase);
+
+                if (!looksLikeServiceHost && !matchesConfiguredExecutable)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    using var targetProcess = Process.GetProcessById(processId);
+                    targetProcess.Kill(entireProcessTree: true);
+                    await targetProcess.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                catch
+                {
+                }
+            }
+        }
+        catch
+        {
         }
     }
 

@@ -310,7 +310,6 @@ public partial class MainWindow : Window
 
             if (element.ToolTip is System.Windows.Controls.ToolTip toolTip)
             {
-                toolTip.StaysOpen = false;
                 toolTip.Style ??= sharedToolTipStyle;
                 toolTip.MaxWidth = 260;
                 if (toolTip.Content is string text)
@@ -323,7 +322,6 @@ public partial class MainWindow : Window
             element.ToolTip = new System.Windows.Controls.ToolTip
             {
                 Content = CreateWrappedToolTipTextBlock(element.ToolTip.ToString() ?? string.Empty),
-                StaysOpen = false,
                 Style = sharedToolTipStyle,
                 MaxWidth = 260
             };
@@ -718,6 +716,11 @@ public partial class MainWindow : Window
     }
 
     public void ShutdownForManagerUpdate()
+    {
+        ShutdownApplication();
+    }
+
+    public void ShutdownForProgramRemoval()
     {
         ShutdownApplication();
     }

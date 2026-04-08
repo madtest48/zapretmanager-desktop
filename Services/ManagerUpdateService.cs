@@ -139,11 +139,12 @@ public sealed class ManagerUpdateService
         Directory.CreateDirectory(updateDirectory);
 
         var backupPath = currentExecutablePath + ".old";
+        var logPath = Path.Combine(updateDirectory, "manager-update.log");
         var scriptPath = Path.Combine(updateDirectory, $"apply-manager-update-{Guid.NewGuid():N}.ps1");
         await File.WriteAllTextAsync(
             scriptPath,
             BuildUpdateScriptContent(),
-            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: true),
             cancellationToken);
 
         var requiresElevation = !CanWriteToDirectory(Path.GetDirectoryName(currentExecutablePath)!);
@@ -151,7 +152,7 @@ public sealed class ManagerUpdateService
         {
             FileName = "powershell.exe",
             Arguments =
-                $"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File {QuoteArgument(scriptPath)} -CurrentProcessId {currentProcessId} -SourcePath {QuoteArgument(downloadedExecutablePath)} -TargetPath {QuoteArgument(currentExecutablePath)} -BackupPath {QuoteArgument(backupPath)} -HostedServiceName {QuoteArgument(hostedServiceName ?? string.Empty)} -RestartHostedServiceFlag {(restartHostedServiceDuringUpdate ? 1 : 0)} -ReinstallHostedServiceFlag {(reinstallHostedServiceAfterUpdate ? 1 : 0)} -HostedServiceInstallationRootPath {QuoteArgument(hostedServiceInstallationRootPath ?? string.Empty)} -HostedServiceProfileToken {QuoteArgument(hostedServiceProfileToken ?? string.Empty)}",
+                $"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File {QuoteArgument(scriptPath)} -CurrentProcessId {currentProcessId} -SourcePath {QuoteArgument(downloadedExecutablePath)} -TargetPath {QuoteArgument(currentExecutablePath)} -BackupPath {QuoteArgument(backupPath)} -LogPath {QuoteArgument(logPath)} -HostedServiceName {QuoteArgument(hostedServiceName ?? string.Empty)} -RestartHostedServiceFlag {(restartHostedServiceDuringUpdate ? 1 : 0)} -ReinstallHostedServiceFlag {(reinstallHostedServiceAfterUpdate ? 1 : 0)} -HostedServiceInstallationRootPath {QuoteArgument(hostedServiceInstallationRootPath ?? string.Empty)} -HostedServiceProfileToken {QuoteArgument(hostedServiceProfileToken ?? string.Empty)}",
             WorkingDirectory = updateDirectory,
             UseShellExecute = true
         };
@@ -308,6 +309,7 @@ param(
     [string]$SourcePath,
     [string]$TargetPath,
     [string]$BackupPath,
+    [string]$LogPath = '',
     [string]$HostedServiceName = '',
     [int]$RestartHostedServiceFlag = 0,
     [int]$ReinstallHostedServiceFlag = 0,
@@ -318,6 +320,33 @@ param(
 $ErrorActionPreference = 'Stop'
 $restartHostedService = $RestartHostedServiceFlag -ne 0
 $reinstallHostedService = $ReinstallHostedServiceFlag -ne 0
+
+function Write-UpdateLog {
+    param([string]$Message)
+
+    if ([string]::IsNullOrWhiteSpace($LogPath)) {
+        return
+    }
+
+    try {
+        $directory = Split-Path -Path $LogPath -Parent
+        if (-not [string]::IsNullOrWhiteSpace($directory)) {
+            New-Item -ItemType Directory -Path $directory -Force | Out-Null
+        }
+
+        Add-Content -LiteralPath $LogPath -Encoding UTF8 -Value ("[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'), $Message)
+    }
+    catch {
+    }
+}
+
+if (-not [string]::IsNullOrWhiteSpace($LogPath)) {
+    try {
+        Set-Content -LiteralPath $LogPath -Encoding UTF8 -Value ("[{0}] Старт обновления программы." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'))
+    }
+    catch {
+    }
+}
 
 for ($i = 0; $i -lt 120; $i++) {
     try {
@@ -337,22 +366,28 @@ $reinstallHostedServicePrepared = $reinstallHostedService -and
     -not [string]::IsNullOrWhiteSpace($HostedServiceName) -and
     -not [string]::IsNullOrWhiteSpace($HostedServiceInstallationRootPath) -and
     -not [string]::IsNullOrWhiteSpace($HostedServiceProfileToken)
+Write-UpdateLog "Подготовка завершена. restartHostedService=$restartHostedService; reinstallHostedService=$reinstallHostedServicePrepared."
 
 if ($restartHostedService -and -not [string]::IsNullOrWhiteSpace($HostedServiceName)) {
     try {
+        Write-UpdateLog "Останавливаем службу $HostedServiceName перед заменой exe."
         $service = Get-Service -Name $HostedServiceName -ErrorAction Stop
         if ($service.Status -ne 'Stopped') {
             Stop-Service -Name $HostedServiceName -Force -ErrorAction Stop
             $service.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(30))
             $hostedServiceStopped = $true
         }
+
+        Write-UpdateLog "Служба $HostedServiceName остановлена."
     }
     catch {
+        Write-UpdateLog "Ошибка остановки службы: $($_.Exception.Message)"
         throw "Не удалось остановить службу перед обновлением программы: $($_.Exception.Message)"
     }
 }
 
 try {
+    Write-UpdateLog "Начинаем замену файла программы."
     if (Test-Path -LiteralPath $BackupPath) {
         Remove-Item -LiteralPath $BackupPath -Force -ErrorAction SilentlyContinue
     }
@@ -360,24 +395,33 @@ try {
     if (Test-Path -LiteralPath $TargetPath) {
         Move-Item -LiteralPath $TargetPath -Destination $BackupPath -Force
         $backupCreated = $true
+        Write-UpdateLog "Текущий exe перемещён во временную копию."
     }
 
     Move-Item -LiteralPath $SourcePath -Destination $TargetPath -Force
+    Write-UpdateLog "Новый exe установлен на место."
 
     if ($reinstallHostedServicePrepared) {
         $quotedInstallationRootPath = '"' + $HostedServiceInstallationRootPath.Replace('"', '\"') + '"'
         $quotedProfileToken = '"' + $HostedServiceProfileToken.Replace('"', '\"') + '"'
         $installArgs = "--install-service $quotedInstallationRootPath $quotedProfileToken"
 
+        Write-UpdateLog "Переустанавливаем службу на новый exe."
         $installProcess = Start-Process -FilePath $TargetPath -ArgumentList $installArgs -Wait -PassThru -WindowStyle Hidden
         if ($installProcess.ExitCode -ne 0) {
+            Write-UpdateLog "Переустановка службы завершилась с ошибкой: код $($installProcess.ExitCode)."
             throw "Автоматическая переустановка службы после обновления программы завершилась с кодом $($installProcess.ExitCode)."
         }
+
+        Write-UpdateLog "Переустановка службы завершена успешно."
     }
     elseif ($hostedServiceStopped -and -not [string]::IsNullOrWhiteSpace($HostedServiceName)) {
+        Write-UpdateLog "Запускаем ранее остановленную службу $HostedServiceName."
         Start-Service -Name $HostedServiceName -ErrorAction Stop
+        Write-UpdateLog "Служба $HostedServiceName снова запущена."
     }
 
+    Write-UpdateLog "Запускаем обновлённый ZapretManager."
     Start-Process -FilePath $TargetPath
 
     Start-Sleep -Seconds 2
@@ -385,8 +429,11 @@ try {
     if ($backupCreated -and (Test-Path -LiteralPath $BackupPath)) {
         Remove-Item -LiteralPath $BackupPath -Force -ErrorAction SilentlyContinue
     }
+
+    Write-UpdateLog "Обновление завершено успешно."
 }
 catch {
+    Write-UpdateLog "Ошибка обновления: $($_.Exception.Message)"
     if ($hostedServiceStopped -and -not [string]::IsNullOrWhiteSpace($HostedServiceName)) {
         try {
             Start-Service -Name $HostedServiceName -ErrorAction SilentlyContinue

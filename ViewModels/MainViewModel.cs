@@ -37,6 +37,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly DnsDiagnosisService _dnsDiagnosisService = new();
     private readonly DiagnosticsService _diagnosticsService = new();
     private readonly ManagerUpdateService _managerUpdateService = new();
+    private readonly ProgramRemovalService _programRemovalService = new();
     private readonly AppSettings _settings;
     private readonly Dictionary<string, ConfigProbeResult> _probeResults = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, TargetGroupDefinition> _builtInTargetGroups = CreateBuiltInTargetGroups()
@@ -168,6 +169,7 @@ public sealed class MainViewModel : ObservableObject
         ApplyUpdateCommand = new AsyncRelayCommand(() => ApplyUpdateAsync(), () => _installation is not null && HasUpdate && !IsBusy);
         RestorePreviousVersionCommand = new AsyncRelayCommand(RestorePreviousVersionAsync, () => _installation is not null && HasPreviousVersion && !IsBusy && !IsProbeRunning);
         CheckManagerUpdateCommand = new AsyncRelayCommand(CheckManagerUpdateAsync, () => !IsBusy && !IsProbeRunning);
+        UninstallProgramCommand = new AsyncRelayCommand(UninstallProgramAsync, () => !IsBusy && !IsProbeRunning);
         ApplyGameModeCommand = new AsyncRelayCommand(ApplyGameModeAsync, () => _installation is not null && SelectedGameMode is not null && !IsBusy);
         UseDefaultTargetsCommand = new RelayCommand(UseDefaultTargets, () => !IsBusy);
         UseYouTubePresetCommand = new RelayCommand(() => UseTargetGroupPreset("youtube"), () => !IsBusy);
@@ -215,6 +217,7 @@ public sealed class MainViewModel : ObservableObject
     public AsyncRelayCommand ApplyUpdateCommand { get; }
     public AsyncRelayCommand RestorePreviousVersionCommand { get; }
     public AsyncRelayCommand CheckManagerUpdateCommand { get; }
+    public AsyncRelayCommand UninstallProgramCommand { get; }
     public AsyncRelayCommand ApplyGameModeCommand { get; }
 
     public string InstallationPath
@@ -1223,9 +1226,7 @@ public sealed class MainViewModel : ObservableObject
 
         currentProcessPath = Path.GetFullPath(currentProcessPath);
         var serviceStatus = _serviceManager.GetStatus();
-        var restartHostedServiceDuringUpdate =
-            serviceStatus.IsInstalled &&
-            _serviceManager.UsesExecutable(currentProcessPath);
+        var restartHostedServiceDuringUpdate = serviceStatus.IsInstalled;
         var reinstallHostedServiceAfterUpdate =
             restartHostedServiceDuringUpdate &&
             !string.IsNullOrWhiteSpace(serviceStatus.InstallationRootPath) &&
@@ -1276,6 +1277,96 @@ public sealed class MainViewModel : ObservableObject
         if (System.Windows.Application.Current?.MainWindow is MainWindow mainWindow)
         {
             mainWindow.ShutdownForManagerUpdate();
+            return;
+        }
+
+        System.Windows.Application.Current?.Shutdown();
+    }
+
+    private async Task UninstallProgramAsync()
+    {
+        EnsureManagerExecutableAvailable();
+
+        var confirmed = DialogService.ConfirmCustom(
+            "Будут удалены ZapretManager, служба, автозапуск, настройки и логи программы.\n\nСборка zapret на диске останется.\n\nПродолжить?",
+            "Zapret Manager",
+            primaryButtonText: "Удалить",
+            secondaryButtonText: "Отмена");
+        if (!confirmed)
+        {
+            return;
+        }
+
+        var currentProcessPath = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName;
+        if (string.IsNullOrWhiteSpace(currentProcessPath))
+        {
+            throw new InvalidOperationException("Не удалось определить путь к ZapretManager.");
+        }
+
+        currentProcessPath = Path.GetFullPath(currentProcessPath);
+        var installationForCleanup = _installation;
+        if (installationForCleanup is null && !string.IsNullOrWhiteSpace(_settings.LastInstallationPath))
+        {
+            installationForCleanup = _discoveryService.TryLoad(_settings.LastInstallationPath);
+        }
+
+        try
+        {
+            await RunBusyAsync(async () =>
+            {
+                if (IsProbeRunning)
+                {
+                    RuntimeStatus = "Останавливаем проверку перед удалением программы...";
+                    CancelProbe();
+                    await WaitForProbeStopAsync(TimeSpan.FromSeconds(40));
+                }
+
+                LastActionText = "Действие: подготавливаем удаление программы";
+                RuntimeStatus = "Отключаем автозапуск и останавливаем службу...";
+                ClearSuspendedServiceRestore();
+
+                try
+                {
+                    _startupRegistrationService.SetEnabled(false);
+                }
+                catch
+                {
+                }
+
+                _settings.StartWithWindowsEnabled = false;
+                _settings.CloseToTrayEnabled = false;
+                _settings.MinimizeToTrayEnabled = false;
+                _settingsService.Save(_settings);
+
+                await _serviceManager.RemoveAsync();
+                await WaitForServiceRemovalAsync(TimeSpan.FromSeconds(20));
+                await _processService.StopCheckUpdatesShellsAsync();
+
+                if (installationForCleanup is not null)
+                {
+                    RuntimeStatus = "Останавливаем активные процессы zapret перед удалением программы...";
+                    await _processService.StopAsync(installationForCleanup);
+                    await WaitForProcessExitAsync(installationForCleanup, TimeSpan.FromSeconds(15));
+                }
+
+                LastActionText = "Действие: запускаем удаление программы";
+                RuntimeStatus = "Подготавливаем полное удаление ZapretManager...";
+                await _programRemovalService.LaunchPreparedRemovalAsync(
+                    currentProcessPath,
+                    Process.GetCurrentProcess().Id,
+                    WindowsServiceManager.ServiceName);
+            }, rethrowExceptions: true);
+        }
+        catch (OperationCanceledException)
+        {
+            LastActionText = "Действие: удаление программы отменено";
+            ShowInlineNotification("Удаление программы отменено.", isError: true);
+            return;
+        }
+
+        if (System.Windows.Application.Current?.MainWindow is MainWindow mainWindow)
+        {
+            mainWindow.ShutdownForProgramRemoval();
             return;
         }
 
@@ -3485,6 +3576,7 @@ public sealed class MainViewModel : ObservableObject
         CheckUpdatesCommand.NotifyCanExecuteChanged();
         ApplyUpdateCommand.NotifyCanExecuteChanged();
         RestorePreviousVersionCommand.NotifyCanExecuteChanged();
+        UninstallProgramCommand.NotifyCanExecuteChanged();
         ApplyGameModeCommand.NotifyCanExecuteChanged();
     }
 

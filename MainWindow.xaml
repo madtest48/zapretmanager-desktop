@@ -856,6 +856,8 @@
                                           Command="{Binding RestorePreviousVersionCommand}" />
                                 <MenuItem Header="Проверить обновление программы"
                                           Command="{Binding CheckManagerUpdateCommand}" />
+                                <MenuItem Header="Удалить программу"
+                                          Command="{Binding UninstallProgramCommand}" />
                                 <Separator />
                                 <MenuItem Header="О программе..."
                                           Command="{Binding OpenAboutCommand}" />
